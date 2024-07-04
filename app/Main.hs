@@ -2,6 +2,7 @@
 
 module Main where
 
+import GHC.Int
 import Database.MySQL.Base
 import           System.IO.Streams (InputStream)
 import qualified System.IO.Streams as Streams
@@ -12,8 +13,40 @@ type Column = String
 type Name = String
 type Row = [MySQLValue]
 type Table = ([Row], Name, [Column])
+data Value = Col Column | Val MySQLValue
+type Values = (Value, Value)
 
+data Condition = And Condition Condition | Or Condition Condition
+                 | Gt Value Value | Lr Value Value | Eq Value Value
 
+------------------------------- SELECCION  ----------- Hay que chequear tipos --------------
+
+getNumber :: MySQLValue -> Int32
+getNumber (MySQLInt32 i) = i
+getNumber _ = undefined
+
+getVal :: Value -> Row -> [Column] -> MySQLValue
+getVal (Val s) _ _ = s
+getVal _ [] _ = undefined
+getVal _ _ [] = undefined
+getVal (Col var) (r:rs) (c:cs) = if var == c then r
+                                 else getVal (Col var) rs cs
+
+-- cond: = > < val or variable
+condition :: Condition -> Row -> [Column] -> Bool 
+condition (And c1 c2) r cs = (condition c1 r cs) && (condition c2 r cs)  
+condition (Or c1 c2) r cs = (condition c1 r cs) || (condition c2 r cs)  
+condition (Gt v1 v2) r cs = getNumber (getVal v1 r cs) > getNumber (getVal v2 r cs)  
+condition (Lr v1 v2) r cs = getNumber (getVal v1 r cs) < getNumber (getVal v2 r cs)  
+condition (Eq v1 v2) r cs = getNumber (getVal v1 r cs) == getNumber (getVal v2 r cs)  
+
+seleccion :: Table -> Condition -> Table
+seleccion ([], name, cols) _ = ([], name, cols)
+seleccion (r:rs, name, cols) cond = let (rs', _, _) = seleccion (rs, name, cols) cond
+                                    in if (condition cond r cols) then (r:rs', "sleccion", cols)
+                                                 else (rs', "seleccion", cols)    
+
+------------------------------- PROYECCION ---------------------------------------------
 -- Devuelve los elementos de la fila correspondiente a las columnas
 cutCol :: (Row, [Column]) -> [Column] -> Row
 cutCol _ [] = []
@@ -39,13 +72,13 @@ sortCols cols (c: cs) = if exist c cols then c:(sortCols cols cs)
                             
 proyeccion :: [Column] -> Table -> Table
 proyeccion [] (_, tname, _) = ([], tname, [])  
-proyeccion cols (trows, _, tcols) = let trows' = cutCols (trows, tcols) (sortCols cols tcols) -- CS TIENE QUE ESTAR ORDENADO
-                                   in (trows', "+", cols)
+proyeccion cols (trows, _, tcols) = let trows' = cutCols (trows, tcols) (sortCols cols tcols)
+                                   in (trows', "proyeccion", cols)
 ---------------------------------------------------------
-
 extractName :: MySQLValue -> IO String
 extractName (MySQLText s) = return (T.unpack s) 
 extractName (MySQLInt32 i) = return (show i)
+extractName _ = undefined
 
 printLine :: Row -> IO [String]
 printLine [] = return []
