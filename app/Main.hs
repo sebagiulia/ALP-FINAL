@@ -14,16 +14,16 @@ type Name = String
 type Row = [MySQLValue]
 type Table = ([Row], Name, [Column])
 data Value = Col Column | Val MySQLValue
-type Values = (Value, Value)
 
 data Condition = And Condition Condition | Or Condition Condition
                  | Gt Value Value | Lr Value Value | Eq Value Value
 
 ------------------------------- SELECCION  ----------- Hay que chequear tipos --------------
 
-getNumber :: MySQLValue -> Int32
-getNumber (MySQLInt32 i) = i
-getNumber _ = undefined
+extractVal :: MySQLValue -> Either Int32 T.Text
+extractVal (MySQLInt32 i) = Left i
+extractVal (MySQLText t) = Right t
+extractVal _ = undefined
 
 getVal :: Value -> Row -> [Column] -> MySQLValue
 getVal (Val s) _ _ = s
@@ -32,13 +32,18 @@ getVal _ _ [] = undefined
 getVal (Col var) (r:rs) (c:cs) = if var == c then r
                                  else getVal (Col var) rs cs
 
+getNumber :: Either Int32 T.Text -> Int32
+getNumber (Left i) = i
+getNumber _ = undefined
+
+
 -- cond: = > < val or variable
 condition :: Condition -> Row -> [Column] -> Bool 
 condition (And c1 c2) r cs = (condition c1 r cs) && (condition c2 r cs)  
 condition (Or c1 c2) r cs = (condition c1 r cs) || (condition c2 r cs)  
-condition (Gt v1 v2) r cs = getNumber (getVal v1 r cs) > getNumber (getVal v2 r cs)  
-condition (Lr v1 v2) r cs = getNumber (getVal v1 r cs) < getNumber (getVal v2 r cs)  
-condition (Eq v1 v2) r cs = getNumber (getVal v1 r cs) == getNumber (getVal v2 r cs)  
+condition (Gt v1 v2) r cs = getNumber (extractVal (getVal v1 r cs)) > getNumber (extractVal (getVal v2 r cs))  
+condition (Lr v1 v2) r cs = getNumber (extractVal (getVal v1 r cs)) < getNumber (extractVal (getVal v2 r cs))  
+condition (Eq v1 v2) r cs = extractVal (getVal v1 r cs) == extractVal (getVal v2 r cs)  
 
 seleccion :: Table -> Condition -> Table
 seleccion ([], name, cols) _ = ([], name, cols)
@@ -131,7 +136,7 @@ arSql = do
   rows <- traduce is -- Nombre de tablas :: [MySQLText nombreTabla]
   tables <- getTables conn rows -- tablas :: [([[MySQLValue]], String)]
   printTables tables
-  printTables [(proyeccion ["proyecto_nombre", "proyecto_id"] (getTableByName "Proyectos" tables))]
+  printTables [(seleccion (getTableByName "Proyectos" tables) (Or (Eq (Col "proyecto_nombre") (Val (MySQLText "Plataforma de crowdfunding para proyectos creativos"))) (Lr (Col "proyecto_id") (Val (MySQLInt32 110)))))]
 
 
 
