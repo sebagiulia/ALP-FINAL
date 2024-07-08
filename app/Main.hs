@@ -18,6 +18,26 @@ data Value = Col Column | Val MySQLValue
 data Condition = And Condition Condition | Or Condition Condition
                  | Gt Value Value | Lr Value Value | Eq Value Value
 
+
+------------------------------- UNION  ----------- Hay que chequear tipos --------------
+compareRow :: Row -> Row -> Bool
+compareRow (v:vs) (v':vs') = (extractVal v) == (extractVal v') && compareRow vs vs'
+compareRow _ _ = True
+
+removeRow :: Row -> [Row] -> [Row]
+removeRow _ [] = []
+removeRow r (r':rs) = if compareRow r r' then removeRow r rs
+                                          else (r': removeRow r rs)
+
+removeEqRows :: Table -> Table
+removeEqRows ((r:rs), name, cols) = let rs' = removeRow r rs 
+                                        (rs'', _, _) = removeEqRows (rs', name, cols)
+                                    in (r:rs'', name, cols)
+removeEqRows t = t 
+
+union :: Table -> Table -> Table
+union (arows, _, acols) (brows, _, _) = removeEqRows (arows ++ brows, "union", acols)
+
 ------------------------------- SELECCION  ----------- Hay que chequear tipos --------------
 
 extractVal :: MySQLValue -> Either Int32 T.Text
@@ -136,7 +156,7 @@ arSql = do
   rows <- traduce is -- Nombre de tablas :: [MySQLText nombreTabla]
   tables <- getTables conn rows -- tablas :: [([[MySQLValue]], String)]
   printTables tables
-  printTables [(seleccion (getTableByName "Proyectos" tables) (Or (Eq (Col "proyecto_nombre") (Val (MySQLText "Plataforma de crowdfunding para proyectos creativos"))) (Lr (Col "proyecto_id") (Val (MySQLInt32 110)))))]
+  printTables [(union (getTableByName "Proyectos" tables) (getTableByName "Proyectos" tables))]
 
 
 
