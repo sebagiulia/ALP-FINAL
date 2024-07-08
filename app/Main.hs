@@ -19,6 +19,21 @@ data Condition = And Condition Condition | Or Condition Condition
                  | Gt Value Value | Lr Value Value | Eq Value Value
 
 
+------------------------------- PRODUCTO CARTESIANO ----------- Hay que chequear tipos --------------
+bindRows :: Row -> [Row] -> [Row]
+bindRows r (r':rs) = ((r ++ r') : (bindRows r rs)) 
+bindRows _ [] = [] 
+
+combineRows :: [Row] -> [Row] -> [Row]
+combineRows [] _ = []
+combineRows (ar:ars) rs = let ars' = bindRows ar rs
+                         in ars' ++ (combineRows ars rs)
+
+prodCartesiano :: Table -> Table -> Table 
+prodCartesiano (arows, _, acols) (brows, _, bcols) = let cols = acols ++ bcols
+                                                         rs = combineRows arows brows
+                                                     in (rs, "X", cols)
+
 ------------------------------- DIFERENCIA  ----------- Hay que chequear tipos --------------
 removeRows :: [Row] -> [Row] -> [Row]
 removeRows rs [] = rs
@@ -166,7 +181,7 @@ arSql = do
   rows <- traduce is -- Nombre de tablas :: [MySQLText nombreTabla]
   tables <- getTables conn rows -- tablas :: [([[MySQLValue]], String)]
   printTables tables
-  printTables [(diferencia (getTableByName "Proyectos" tables) (seleccion (getTableByName "Proyectos" tables) (Eq (Val (MySQLInt32 110)) (Col "proyecto_id"))))]
+  printTables [(prodCartesiano (getTableByName "Proyectos" tables) (getTableByName "EmpleadosProyectos" tables))]
 
 
 
