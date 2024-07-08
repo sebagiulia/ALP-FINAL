@@ -19,6 +19,16 @@ data Condition = And Condition Condition | Or Condition Condition
                  | Gt Value Value | Lr Value Value | Eq Value Value
 
 
+------------------------------- DIFERENCIA  ----------- Hay que chequear tipos --------------
+removeRows :: [Row] -> [Row] -> [Row]
+removeRows rs [] = rs
+removeRows rs (r':rs') = let rs'' = removeRow r' rs
+                         in removeRows rs'' rs' 
+
+diferencia :: Table -> Table -> Table
+diferencia (ars, _, acols) (brs, _, _) = let rs = removeRows ars brs
+                                         in (rs , "diferencia", acols)
+
 ------------------------------- UNION  ----------- Hay que chequear tipos --------------
 compareRow :: Row -> Row -> Bool
 compareRow (v:vs) (v':vs') = (extractVal v) == (extractVal v') && compareRow vs vs'
@@ -156,7 +166,7 @@ arSql = do
   rows <- traduce is -- Nombre de tablas :: [MySQLText nombreTabla]
   tables <- getTables conn rows -- tablas :: [([[MySQLValue]], String)]
   printTables tables
-  printTables [(union (getTableByName "Proyectos" tables) (getTableByName "Proyectos" tables))]
+  printTables [(diferencia (getTableByName "Proyectos" tables) (seleccion (getTableByName "Proyectos" tables) (Eq (Val (MySQLInt32 110)) (Col "proyecto_id"))))]
 
 
 
