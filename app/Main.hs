@@ -19,6 +19,11 @@ data Condition = And Condition Condition | Or Condition Condition
                  | Gt Value Value | Lr Value Value | Eq Value Value
 
 
+
+------------------------------- RENOMBRAMIENTO -------------------------------------------------
+renombramiento :: Table -> Name -> Table
+renombramiento (rs, _, cs) n = (rs, n, cs)
+
 ------------------------------- PRODUCTO CARTESIANO ----------- Hay que chequear tipos --------------
 bindRows :: Row -> [Row] -> [Row]
 bindRows r (r':rs) = ((r ++ r') : (bindRows r rs)) 
