@@ -8,6 +8,7 @@ import           System.IO.Streams (InputStream)
 import qualified System.IO.Streams as Streams
 import qualified Data.Text as T
 import Data.String
+import Data.List
 
 type Name = String
 type Column = (Name, Name)
@@ -19,6 +20,23 @@ data Condition = And Condition Condition | Or Condition Condition
                  | Gt Value Value | Lr Value Value | Eq Value Value | Empty
 
 
+------------------------------- DIVISION ------- Hay que chequear tipos --------------
+removeCols :: [Column] -> [Column] -> [Column]
+removeCols a b = a \\ b
+
+-- r/s = ΠR−S (r) − ΠR−S {[ΠR−S (r) × s] − r}
+--       ---p1---         ---p1---   
+--                        ------p2-----
+--                        --------p3--------                
+--                  -----------p4------------                
+division :: Table -> Table -> Table
+division t1@(_,_,acols) t2@(_,_,bcols) = let rest = removeCols acols bcols
+                                             p1 = proyeccion rest t1
+                                             p2 = prodCartesiano p1 t2
+                                             p3 = diferencia p2 t1
+                                             p4 = proyeccion rest p3
+                                         in diferencia p1 p4 
+
 ------------------------------- PRODUCTO NATURAL ------- Hay que chequear tipos --------------
 combineCols :: [Column] -> [Column]
 combineCols [] = []
@@ -26,9 +44,10 @@ combineCols (c: cs) = let (_, rest) = lookFor (snd c) cs
                       in (c: combineCols rest)
                       where lookFor _ [] = ([],[])
                             lookFor n (col:cols) = let (eq', rest') = lookFor n cols
-                                                 in if snd col == n then ((col:eq'), rest')
-                                                                    else (eq', col:rest')
+                                                   in if snd col == n then ((col:eq'), rest')
+                                                                      else (eq', col:rest')
 
+-- Funcion que genera el arbol de condicion para producto natural.
 prodNatCondition :: [Column] -> Condition
 prodNatCondition [] = Empty 
 prodNatCondition (c:cols) = let (sames, rest) = lookFor (snd c) cols -- Busco las columnas con el mismo nombre
@@ -40,6 +59,7 @@ prodNatCondition (c:cols) = let (sames, rest) = lookFor (snd c) cols -- Busco la
                                                                            else (eq', col:rest')
                                   equals _ [] = Empty
                                   equals col (same:ss) = And (Eq (Col col) (Col same)) (equals col ss) 
+
 prodNatural :: Table -> Table -> Table
 prodNatural t1 t2 = let t'@(_, _, cols') = prodCartesiano t1 t2
                         cond = prodNatCondition cols'
@@ -72,9 +92,7 @@ prodCartesiano (arows, _, acols) (brows, _, bcols) = let cols = acols ++ bcols
 
 ------------------------------- DIFERENCIA  ----------- Hay que chequear tipos --------------
 removeRows :: [Row] -> [Row] -> [Row]
-removeRows rs [] = rs
-removeRows rs (r':rs') = let rs'' = removeRow r' rs
-                         in removeRows rs'' rs' 
+removeRows a b = a \\ b 
 
 diferencia :: Table -> Table -> Table
 diferencia (ars, _, acols) (brs, _, _) = let rs = removeRows ars brs
@@ -218,7 +236,7 @@ arSql = do
   rows <- traduce is -- Nombre de tablas :: [MySQLText nombreTabla]
   tables <- getTables conn rows -- tablas :: [([[MySQLValue]], String)]
   printTables tables
-  printTables [(prodNatural (getTableByName "Proyectos" tables) (getTableByName "EmpleadosProyectos" tables))]
+  printTables [(diferencia (getTableByName "Proyectos" tables) (seleccion (getTableByName "Proyectos" tables) (Eq (Col ("Proyectos", "proyecto_id")) (Val (MySQLInt32 105)))))]
 
 
 
