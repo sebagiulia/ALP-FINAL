@@ -9,16 +9,47 @@ import qualified System.IO.Streams as Streams
 import qualified Data.Text as T
 import Data.String
 
-type Column = String
 type Name = String
+type Column = (Name, Name)
 type Row = [MySQLValue]
 type Table = ([Row], Name, [Column])
 data Value = Col Column | Val MySQLValue
 
 data Condition = And Condition Condition | Or Condition Condition
-                 | Gt Value Value | Lr Value Value | Eq Value Value
+                 | Gt Value Value | Lr Value Value | Eq Value Value | Empty
 
 
+------------------------------- PRODUCTO NATURAL ------- Hay que chequear tipos --------------
+combineCols :: [Column] -> [Column]
+combineCols [] = []
+combineCols (c: cs) = let (_, rest) = lookFor (snd c) cs
+                      in (c: combineCols rest)
+                      where lookFor _ [] = ([],[])
+                            lookFor n (col:cols) = let (eq', rest') = lookFor n cols
+                                                 in if snd col == n then ((col:eq'), rest')
+                                                                    else (eq', col:rest')
+
+prodNatCondition :: [Column] -> Condition
+prodNatCondition [] = Empty 
+prodNatCondition (c:cols) = let (sames, rest) = lookFor (snd c) cols -- Busco las columnas con el mismo nombre
+                                cond = equals c sames -- Genero el arbol de condicion
+                            in And cond (prodNatCondition rest)
+                            where lookFor _ [] = ([],[])
+                                  lookFor n (col:cs) = let (eq', rest') = lookFor n cs
+                                                        in if snd col == n then ((col:eq'), rest')
+                                                                           else (eq', col:rest')
+                                  equals _ [] = Empty
+                                  equals col (same:ss) = And (Eq (Col col) (Col same)) (equals col ss) 
+prodNatural :: Table -> Table -> Table
+prodNatural t1 t2 = let t'@(_, _, cols') = prodCartesiano t1 t2
+                        cond = prodNatCondition cols'
+                        t = seleccion t' cond
+                        cols = combineCols cols'
+                    in proyeccion cols t
+
+------------------------------- INTERSECCION ----------- Hay que chequear tipos --------------
+interseccion :: Table -> Table -> Table 
+interseccion t1 t2 = diferencia t1 (diferencia t1 t2)
 
 ------------------------------- RENOMBRAMIENTO -------------------------------------------------
 renombramiento :: Table -> Name -> Table
@@ -34,7 +65,7 @@ combineRows [] _ = []
 combineRows (ar:ars) rs = let ars' = bindRows ar rs
                          in ars' ++ (combineRows ars rs)
 
-prodCartesiano :: Table -> Table -> Table 
+prodCartesiano :: Table -> Table -> Table -- aname y bname tienen que ser distintos
 prodCartesiano (arows, _, acols) (brows, _, bcols) = let cols = acols ++ bcols
                                                          rs = combineRows arows brows
                                                      in (rs, "X", cols)
@@ -89,6 +120,7 @@ getNumber _ = undefined
 
 -- cond: = > < val or variable
 condition :: Condition -> Row -> [Column] -> Bool 
+condition Empty _ _ = True  
 condition (And c1 c2) r cs = (condition c1 r cs) && (condition c2 r cs)  
 condition (Or c1 c2) r cs = (condition c1 r cs) || (condition c2 r cs)  
 condition (Gt v1 v2) r cs = getNumber (extractVal (getVal v1 r cs)) > getNumber (extractVal (getVal v2 r cs))  
@@ -160,9 +192,9 @@ traduce stream = Streams.toList stream
 
 
 
-getColumns :: [ColumnDef] -> [String]
-getColumns c = [show2 (columnName x) | x <- c ]
-               where show2 w = init (tail (show w)) 
+getColumns :: [ColumnDef] -> Name -> [Column]
+getColumns c  n = [show2 (columnName x) | x <- c ]
+                where show2 w = (n , init (tail (show w))) 
 
 getTables :: MySQLConn -> [[MySQLValue]] -> IO [Table] -- > [(table, tname, cnames)]
 getTables _ [] = return [] 
@@ -170,7 +202,7 @@ getTables conn (l:ls) = do tableName <- extractName (l!!0)
                            (c, is) <- query_ conn (fromString ("select * from " ++ tableName))
                            table <- traduce is
                            tables <- getTables conn ls
-                           return ((table, tableName, getColumns c):tables) 
+                           return ((table, tableName, getColumns c tableName):tables) 
 
 getTableByName :: Name -> [Table] -> Table
 getTableByName _ [] = ([], "undefined",[]) -- Undefined
@@ -186,7 +218,7 @@ arSql = do
   rows <- traduce is -- Nombre de tablas :: [MySQLText nombreTabla]
   tables <- getTables conn rows -- tablas :: [([[MySQLValue]], String)]
   printTables tables
-  printTables [(prodCartesiano (getTableByName "Proyectos" tables) (getTableByName "EmpleadosProyectos" tables))]
+  printTables [(prodNatural (getTableByName "Proyectos" tables) (getTableByName "EmpleadosProyectos" tables))]
 
 
 
