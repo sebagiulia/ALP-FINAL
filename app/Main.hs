@@ -1,247 +1,276 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main where
 
-import GHC.Int
-import Database.MySQL.Base
-import           System.IO.Streams (InputStream)
-import qualified System.IO.Streams as Streams
-import qualified Data.Text as T
-import Data.String
-import Data.List
+import           Control.Exception              ( catch
+                                                , IOException
+                                                )
+import           Control.Monad.Except
+import           Data.Char
+import           Data.List
+import           Data.Maybe
+import           Prelude                 hiding ( print )
+import           System.Console.Haskeline
+import qualified Control.Monad.Catch           as MC
+import           System.Environment
+import           System.IO               hiding ( print )
+import           Text.PrettyPrint.HughesPJ      ( render
+                                                , text
+                                                )
 
-type Name = String
-type Column = (Name, Name)
-type Row = [MySQLValue]
-type Table = ([Row], Name, [Column])
-data Value = Col Column | Val MySQLValue
+import TableOperators
+import           Common
+import           PrettyPrinter
+import           Simplytyped
+import           Parse
+---------------------
+--- Interpreter
+---------------------
 
-data Condition = And Condition Condition | Or Condition Condition
-                 | Gt Value Value | Lr Value Value | Eq Value Value | Empty
+main :: IO ()
+main = runInputT defaultSettings main'
 
+main' :: InputT IO ()
+main' = do
+  args <- lift getArgs
+  readevalprint args (S True "" [])
 
-------------------------------- DIVISION ------- Hay que chequear tipos --------------
-removeCols :: [Column] -> [Column] -> [Column]
-removeCols a b = a \\ b
+iname :: String
+iname = "cálculo lambda simplemente tipado"
 
--- r/s = ΠR−S (r) − ΠR−S {[ΠR−S (r) × s] − r}
---       ---p1---         ---p1---   
---                        ------p2-----
---                        --------p3--------                
---                  -----------p4------------                
-division :: Table -> Table -> Table
-division t1@(_,_,acols) t2@(_,_,bcols) = let rest = removeCols acols bcols
-                                             p1 = proyeccion rest t1
-                                             p2 = prodCartesiano p1 t2
-                                             p3 = diferencia p2 t1
-                                             p4 = proyeccion rest p3
-                                         in diferencia p1 p4 
+ioExceptionCatcher :: IOException -> IO (Maybe a)
+ioExceptionCatcher _ = return Nothing
 
-------------------------------- PRODUCTO NATURAL ------- Hay que chequear tipos --------------
-combineCols :: [Column] -> [Column]
-combineCols [] = []
-combineCols (c: cs) = let (_, rest) = lookFor (snd c) cs
-                      in (c: combineCols rest)
-                      where lookFor _ [] = ([],[])
-                            lookFor n (col:cols) = let (eq', rest') = lookFor n cols
-                                                   in if snd col == n then ((col:eq'), rest')
-                                                                      else (eq', col:rest')
+data State = S
+  { inter :: Bool
+  ,       -- True, si estamos en modo interactivo.
+    lfile :: String
+  ,     -- Ultimo archivo cargado (para hacer "reload")
+    ve    :: NameEnv Table TableType  -- Entorno con variables globales y su valor  [(Name, (Value, Type))]
+  }
 
--- Funcion que genera el arbol de condicion para producto natural.
-prodNatCondition :: [Column] -> Condition
-prodNatCondition [] = Empty 
-prodNatCondition (c:cols) = let (sames, rest) = lookFor (snd c) cols -- Busco las columnas con el mismo nombre
-                                cond = equals c sames -- Genero el arbol de condicion
-                            in And cond (prodNatCondition rest)
-                            where lookFor _ [] = ([],[])
-                                  lookFor n (col:cs) = let (eq', rest') = lookFor n cs
-                                                        in if snd col == n then ((col:eq'), rest')
-                                                                           else (eq', col:rest')
-                                  equals _ [] = Empty
-                                  equals col (same:ss) = And (Eq (Col col) (Col same)) (equals col ss) 
+iprompt :: State -> String
+iprompt st = "TS:" ++ show (length (ve st)) ++ "> "
 
-prodNatural :: Table -> Table -> Table
-prodNatural t1 t2 = let t'@(_, _, cols') = prodCartesiano t1 t2
-                        cond = prodNatCondition cols'
-                        t = seleccion t' cond
-                        cols = combineCols cols'
-                    in proyeccion cols t
+--  read-eval-print loop
+readevalprint :: [String] -> State -> InputT IO ()
+readevalprint args state@(S inter lfile ve) =
+  let rec st = do
+        mx <- MC.catch
+          (if inter then getInputLine (iprompt st) else lift $ fmap Just getLine)
+          (lift . ioExceptionCatcher)
+        case mx of
+          Nothing -> return ()
+          Just "" -> rec st
+          Just x  -> do
+            c   <- interpretCommand x
+            st' <- handleCommand st c
+            maybe (return ()) rec st'
+  in  do
+        state' <- compileFiles (prelude : args) state
+        when inter $ lift $ putStrLn
+          (  "Intérprete de "
+          ++ iname
+          ++ ".\n"
+          ++ "Escriba :? para recibir ayuda."
+          )
+        --  enter loop
+        rec state' { inter = True }
 
-------------------------------- INTERSECCION ----------- Hay que chequear tipos --------------
-interseccion :: Table -> Table -> Table 
-interseccion t1 t2 = diferencia t1 (diferencia t1 t2)
+data Command = Compile CompileForm
+              | Print String
+              | Recompile
+              | Browse
+              | Quit
+              | Help
+              | Noop
+              | FindType String
 
-------------------------------- RENOMBRAMIENTO -------------------------------------------------
-renombramiento :: Table -> Name -> Table
-renombramiento (rs, _, cs) n = (rs, n, cs)
+data CompileForm = CompileInteractive  String
+                  | CompileFile         String
 
-------------------------------- PRODUCTO CARTESIANO ----------- Hay que chequear tipos --------------
-bindRows :: Row -> [Row] -> [Row]
-bindRows r (r':rs) = ((r ++ r') : (bindRows r rs)) 
-bindRows _ [] = [] 
+interpretCommand :: String -> InputT IO Command
+interpretCommand x = lift $ if isPrefixOf ":" x
+  then do
+    let (cmd, t') = break isSpace x
+    let t         = dropWhile isSpace t'
+    --  find matching commands
+    let matching = filter (\(Cmd cs _ _ _) -> any (isPrefixOf cmd) cs) commands
+    case matching of
+      [] -> do
+        putStrLn
+          ("Comando desconocido `" ++ cmd ++ "'. Escriba :? para recibir ayuda."
+          )
+        return Noop
+      [Cmd _ _ f _] -> do
+        return (f t)
+      _ -> do
+        putStrLn
+          (  "Comando ambigüo, podría ser "
+          ++ concat (intersperse ", " [ head cs | Cmd cs _ _ _ <- matching ])
+          ++ "."
+          )
+        return Noop
+  else return (Compile (CompileInteractive x))
 
-combineRows :: [Row] -> [Row] -> [Row]
-combineRows [] _ = []
-combineRows (ar:ars) rs = let ars' = bindRows ar rs
-                         in ars' ++ (combineRows ars rs)
+handleCommand :: State -> Command -> InputT IO (Maybe State)
+handleCommand state@(S inter lfile ve) cmd = case cmd of
+  Quit   -> lift $ when (not inter) (putStrLn "!@#$^&*") >> return Nothing
+  Noop   -> return (Just state)
+  Help   -> lift $ putStr (helpTxt commands) >> return (Just state)
+  Browse -> lift $ do
+    putStr (unlines [ s | s <- reverse (nub (map fst ve)) ])
+    return (Just state)
+  Compile c -> do
+    state' <- case c of
+      CompileInteractive s -> compilePhrase state s
+      CompileFile        f -> compileFile (state { lfile = f }) f
+    return (Just state')
+  Print s ->
+    let s' = reverse (dropWhile isSpace (reverse (dropWhile isSpace s)))
+    in  printPhrase s' >> return (Just state)
+  Recompile -> if null lfile
+    then lift $ putStrLn "No hay un archivo cargado.\n" >> return (Just state)
+    else handleCommand state (Compile (CompileFile lfile))
+  FindType s -> do
+    x' <- parseIO "<interactive>" term_parse s
+    t  <- case x' of
+      Nothing -> return $ Left "Error en el parsing."
+      Just x  -> return $ infer ve $ conversion $ x
+    case t of
+      Left  err -> lift (putStrLn ("Error de tipos: " ++ err)) >> return ()
+      Right t'  -> lift $ putStrLn $ render $ printType t'
+    return (Just state)
 
-prodCartesiano :: Table -> Table -> Table -- aname y bname tienen que ser distintos
-prodCartesiano (arows, _, acols) (brows, _, bcols) = let cols = acols ++ bcols
-                                                         rs = combineRows arows brows
-                                                     in (rs, "X", cols)
+data InteractiveCommand = Cmd [String] String (String -> Command) String
 
-------------------------------- DIFERENCIA  ----------- Hay que chequear tipos --------------
-removeRows :: [Row] -> [Row] -> [Row]
-removeRows a b = a \\ b 
+commands :: [InteractiveCommand]
+commands =
+  [ Cmd [":browse"] "" (const Browse) "Ver los nombres en scope"
+  , Cmd [":load"]
+        "<file>"
+        (Compile . CompileFile)
+        "Cargar un programa desde un archivo"
+  , Cmd [":print"] "<exp>" Print "Imprime un término y sus ASTs"
+  , Cmd [":reload"]
+        "<file>"
+        (const Recompile)
+        "Volver a cargar el último archivo"
+  , Cmd [":quit"]       ""       (const Quit) "Salir del intérprete"
+  , Cmd [":help", ":?"] ""       (const Help) "Mostrar esta lista de comandos"
+  , Cmd [":type"]       "<term>" (FindType)   "Inferir el tipo de un término"
+  ]
 
-diferencia :: Table -> Table -> Table
-diferencia (ars, _, acols) (brs, _, _) = let rs = removeRows ars brs
-                                         in (rs , "diferencia", acols)
+helpTxt :: [InteractiveCommand] -> String
+helpTxt cs =
+  "Lista de comandos:  Cualquier comando puede ser abreviado a :c donde\n"
+    ++ "c es el primer caracter del nombre completo.\n\n"
+    ++ "<expr>                  evaluar la expresión\n"
+    ++ "def <var> = <expr>      definir una variable\n"
+    ++ unlines
+         (map
+           (\(Cmd c a _ d) ->
+             let
+               ct =
+                 concat
+                   (intersperse ", "
+                                (map (++ if null a then "" else " " ++ a) c)
+                   )
+             in  ct ++ replicate ((24 - length ct) `max` 2) ' ' ++ d
+           )
+           cs
+         )
 
-------------------------------- UNION  ----------- Hay que chequear tipos --------------
-compareRow :: Row -> Row -> Bool
-compareRow (v:vs) (v':vs') = (extractVal v) == (extractVal v') && compareRow vs vs'
-compareRow _ _ = True
+compileFiles :: [String] -> State -> InputT IO State
+compileFiles xs s =
+  foldM (\s x -> compileFile (s { lfile = x, inter = False }) x) s xs
 
-removeRow :: Row -> [Row] -> [Row]
-removeRow _ [] = []
-removeRow r (r':rs) = if compareRow r r' then removeRow r rs
-                                          else (r': removeRow r rs)
-
-removeEqRows :: Table -> Table
-removeEqRows ((r:rs), name, cols) = let rs' = removeRow r rs 
-                                        (rs'', _, _) = removeEqRows (rs', name, cols)
-                                    in (r:rs'', name, cols)
-removeEqRows t = t 
-
-union :: Table -> Table -> Table
-union (arows, _, acols) (brows, _, _) = removeEqRows (arows ++ brows, "union", acols)
-
-------------------------------- SELECCION  ----------- Hay que chequear tipos --------------
-
-extractVal :: MySQLValue -> Either Int32 T.Text
-extractVal (MySQLInt32 i) = Left i
-extractVal (MySQLText t) = Right t
-extractVal _ = undefined
-
-getVal :: Value -> Row -> [Column] -> MySQLValue
-getVal (Val s) _ _ = s
-getVal _ [] _ = undefined
-getVal _ _ [] = undefined
-getVal (Col var) (r:rs) (c:cs) = if var == c then r
-                                 else getVal (Col var) rs cs
-
-getNumber :: Either Int32 T.Text -> Int32
-getNumber (Left i) = i
-getNumber _ = undefined
-
-
--- cond: = > < val or variable
-condition :: Condition -> Row -> [Column] -> Bool 
-condition Empty _ _ = True  
-condition (And c1 c2) r cs = (condition c1 r cs) && (condition c2 r cs)  
-condition (Or c1 c2) r cs = (condition c1 r cs) || (condition c2 r cs)  
-condition (Gt v1 v2) r cs = getNumber (extractVal (getVal v1 r cs)) > getNumber (extractVal (getVal v2 r cs))  
-condition (Lr v1 v2) r cs = getNumber (extractVal (getVal v1 r cs)) < getNumber (extractVal (getVal v2 r cs))  
-condition (Eq v1 v2) r cs = extractVal (getVal v1 r cs) == extractVal (getVal v2 r cs)  
-
-seleccion :: Table -> Condition -> Table
-seleccion ([], name, cols) _ = ([], name, cols)
-seleccion (r:rs, name, cols) cond = let (rs', _, _) = seleccion (rs, name, cols) cond
-                                    in if (condition cond r cols) then (r:rs', "sleccion", cols)
-                                                 else (rs', "seleccion", cols)    
-
-------------------------------- PROYECCION ---------------------------------------------
--- Devuelve los elementos de la fila correspondiente a las columnas
-cutCol :: (Row, [Column]) -> [Column] -> Row
-cutCol _ [] = []
-cutCol (_, []) _  = []
-cutCol ([], _) _ = []
-cutCol ((v:vs),(c:cols)) (cc:ccols) = if c == cc then (v: (cutCol (vs, cols) ccols) )
-                                                 else cutCol (vs, cols) ccols
-
--- Devuelve ls filas cortadas a partir de las columnas [cols]
-cutCols :: ([Row], [Column]) -> [Column] -> [Row]
-cutCols ([], _) _ = []
-cutCols ((r:rows), tcols) cols = let r' = cutCol (r, tcols) cols
-                                     rows' = cutCols (rows, tcols) cols
-                                 in (r':rows')
-
-sortCols :: [Column] -> [Column] -> [Column]
-sortCols _ [] = []
-sortCols cols (c: cs) = if exist c cols then c:(sortCols cols cs)
-                                        else sortCols cols cs
-                        where exist _ [] = False
-                              exist co (col:columns) = if co == col then True
-                                                                    else exist co columns   
-                            
-proyeccion :: [Column] -> Table -> Table
-proyeccion [] (_, tname, _) = ([], tname, [])  
-proyeccion cols (trows, _, tcols) = let trows' = cutCols (trows, tcols) (sortCols cols tcols)
-                                   in (trows', "proyeccion", cols)
----------------------------------------------------------
-extractName :: MySQLValue -> IO String
-extractName (MySQLText s) = return (T.unpack s) 
-extractName (MySQLInt32 i) = return (show i)
-extractName _ = undefined
-
-printLine :: Row -> IO [String]
-printLine [] = return []
-printLine (l:ls) = do v <- extractName l
-                      vs <- printLine ls
-                      return (v:vs)          
-
-printLines :: [Row] -> IO ()
-printLines [] = putStrLn ""
-printLines (l:ls) = do line <- printLine l
-                       print line
-                       printLines ls
-                   
-printTables :: [Table] -> IO ()
-printTables [] = putStrLn ""
-printTables ((t, n, cs):ts) = do putStrLn ("Tabla: " ++ n)
-                                 print cs
-                                 printLines t
-                                 printTables ts
+compileFile :: State -> String -> InputT IO State
+compileFile state@(S inter lfile v) f = do
+  lift $ putStrLn ("Abriendo " ++ f ++ "...")
+  let f' = reverse (dropWhile isSpace (reverse f))
+  x <- lift $ Control.Exception.catch
+    (readFile f')
+    (\e -> do
+      let err = show (e :: IOException)
+      hPutStr stderr
+              ("No se pudo abrir el archivo " ++ f' ++ ": " ++ err ++ "\n")
+      return ""
+    )
+  stmts <- parseIO f' (stmts_parse) x
+  maybe (return state) (foldM handleStmt state) stmts
 
 
-traduce :: InputStream a -> IO [a] 
-traduce stream = Streams.toList stream
+compilePhrase :: State -> String -> InputT IO State
+compilePhrase state x = do
+  x' <- parseIO "<interactive>" stmt_parse x
+  case x' of
+    Just t -> (handleStmt state t)
+    _ -> return state
+
+printPhrase :: String -> InputT IO ()
+printPhrase x = do
+  x' <- parseIO "<interactive>" stmt_parse x
+  maybe (return ()) (printStmt . fmap (\y -> (y, conversion y))) x'
+
+printStmt :: Stmt (TableTerm, Term) -> InputT IO ()
+printStmt stmt = lift $ do
+  let outtext = case stmt of
+        Def x (_, e) -> "def " ++ x ++ " = "-- ++ render (printTerm e)
+        Eval (d, e) ->
+          "TableTerm AST:\n"
+            ++ show d
+            ++ "\n\nTerm AST:\n"
+            ++ show e
+          --  ++ "\n\nSe muestra como:\n"
+          --  ++ render (printTerm e)
+  putStrLn outtext
+
+parseIO :: String -> (String -> ParseResult a) -> String -> InputT IO (Maybe a)
+parseIO f p x = lift $ case p x of
+  Failed e -> do
+    putStrLn (f ++ ": " ++ e)
+    return Nothing
+  Ok r -> return (Just r)
+
+handleStmt :: State -> Stmt TableTerm -> InputT IO State
+handleStmt state stmt = lift $ do
+  case stmt of
+    Connect d -> checkTypeConn d
+    Def x e -> checkType x (conversion e)
+    Eval e  -> checkType it (conversion e)
+ where
+  checkType i t = do
+    case infer (ve state) t of
+      Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
+      Right ty  -> checkEval i t ty
+  checkEval i t ty = do
+    let v = eval (ve state) [] t
+    _ <- when (inter state) $ do
+      let outtext =
+            if i == it then render (printTable v) else render (text i)
+      putStrLn outtext
+    if i == it then return state
+               else return (state { ve = (i, (v, ty)) : ve state })
+  checkTypeConn d = do
+    case inferConn d of
+      Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
+      Right ty  -> checkEvalConn ty 
+  checkEvalConn ty = do
+    v <- evalConn ty (ve state)
+    _ <- when (inter state) $ do
+      let outtext = case v of
+                      Right ts -> "Dataset cargado: \n" ++ (unlines [ s | s <- reverse (nub (map fst ts)) ])
+                      Left ex -> "Error en la conexión:" ++ show ex
+      putStrLn outtext
+    let newst = case v of
+                  Right new -> new
+                  _ -> []
+    return (state { ve = newst})
+    
+
+prelude :: String
+prelude = "Ejemplos/Prelude.lam"
+
+it :: String
+it = "it"
 
 
-
-getColumns :: [ColumnDef] -> Name -> [Column]
-getColumns c  n = [show2 (columnName x) | x <- c ]
-                where show2 w = (n , init (tail (show w))) 
-
-getTables :: MySQLConn -> [[MySQLValue]] -> IO [Table] -- > [(table, tname, cnames)]
-getTables _ [] = return [] 
-getTables conn (l:ls) = do tableName <- extractName (l!!0)
-                           (c, is) <- query_ conn (fromString ("select * from " ++ tableName))
-                           table <- traduce is
-                           tables <- getTables conn ls
-                           return ((table, tableName, getColumns c tableName):tables) 
-
-getTableByName :: Name -> [Table] -> Table
-getTableByName _ [] = ([], "undefined",[]) -- Undefined
-getTableByName n ((a, tname, b): ts) | n == tname = (a, tname, b)
-                                     | otherwise = getTableByName n ts
-
-arSql :: IO ()
-arSql = do
-  conn <-
-    connect
-      defaultConnectInfo {ciUser = "ar-sql-user", ciPassword = "ar-sql-password", ciDatabase = "alp_final"}
-  (_, is) <- query_ conn "show tables"
-  rows <- traduce is -- Nombre de tablas :: [MySQLText nombreTabla]
-  tables <- getTables conn rows -- tablas :: [([[MySQLValue]], String)]
-  printTables tables
-  printTables [(diferencia (getTableByName "Proyectos" tables) (seleccion (getTableByName "Proyectos" tables) (Eq (Col ("Proyectos", "proyecto_id")) (Val (MySQLInt32 105)))))]
-
-
-
-main :: IO Int
-main = do
-  putStrLn "Hello, Haskell!"
-  arSql
-  return 0

@@ -1,0 +1,1 @@
+{ciUser = "ar-sql-user", ciPassword = "ar-sql-password", ciDatabase = "alp_final"}
