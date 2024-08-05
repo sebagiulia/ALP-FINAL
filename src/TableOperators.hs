@@ -133,26 +133,64 @@ extractVal (MySQLInt32 i) = Left i
 extractVal (MySQLText t) = Right t
 extractVal _ = undefined
 
-getVal :: Value -> Row -> [Column] -> MySQLValue
-getVal (Val s) _ _ = s
-getVal _ [] _ = undefined
-getVal _ _ [] = undefined
-getVal (Col var) (r:rs) (c:cs) = if var == c then r
+getVal :: Value -> Row -> [Column] -> Either Bool MySQLValue
+getVal (Val s) _ _ = Right s
+getVal (Col var) (r:rs) (c:cs) = if snd var == snd c && ( fst var == fst c || fst c == "") then Right r
                                  else getVal (Col var) rs cs
+getVal _ [] _ = Left False
+getVal _ _ [] = Left False
 
-getNumber :: Either Int32 T.Text -> Int32
-getNumber (Left i) = i
-getNumber _ = undefined
+getNumber :: Either Int32 T.Text -> Either Bool Int32
+getNumber (Left i) = Right i
+getNumber _ = Left False
 
 
 -- cond: = > < val or variable
 condition :: Condition -> Row -> [Column] -> Bool 
-condition Empty _ _ = True  
+condition Empty _ _ = True
 condition (And c1 c2) r cs = (condition c1 r cs) && (condition c2 r cs)  
 condition (Or c1 c2) r cs = (condition c1 r cs) || (condition c2 r cs)  
-condition (Gr v1 v2) r cs = getNumber (extractVal (getVal v1 r cs)) > getNumber (extractVal (getVal v2 r cs))  
-condition (Lr v1 v2) r cs = getNumber (extractVal (getVal v1 r cs)) < getNumber (extractVal (getVal v2 r cs))  
-condition (Eq v1 v2) r cs = extractVal (getVal v1 r cs) == extractVal (getVal v2 r cs)  
+condition (Gr v1 v2) r cs = case (getVal v1 r cs) of
+                                Right a -> case (getVal v2 r cs) of
+                                                Right b -> case getNumber (extractVal a) of
+                                                                Right a' -> case getNumber (extractVal b) of
+                                                                                Right b' -> a' > b'
+                                                                                _ -> False
+                                                                _ -> False
+                                                _ -> False
+                                _ -> False
+condition (Greq v1 v2) r cs = case (getVal v1 r cs) of
+                                Right a -> case (getVal v2 r cs) of
+                                                Right b -> case getNumber (extractVal a) of
+                                                                Right a' -> case getNumber (extractVal b) of
+                                                                                Right b' -> a' >= b'
+                                                                                _ -> False
+                                                                _ -> False
+                                                _ -> False
+                                _ -> False
+condition (Lr v1 v2) r cs = case (getVal v1 r cs) of
+                                Right a -> case (getVal v2 r cs) of
+                                                Right b -> case getNumber (extractVal a) of
+                                                                Right a' -> case getNumber (extractVal b) of
+                                                                                Right b' -> a' < b'
+                                                                                _ -> False
+                                                                _ -> False
+                                                _ -> False
+                                _ -> False
+condition (Lreq v1 v2) r cs = case (getVal v1 r cs) of
+                                Right a -> case (getVal v2 r cs) of
+                                                Right b -> case getNumber (extractVal a) of
+                                                                Right a' -> case getNumber (extractVal b) of
+                                                                                Right b' -> a' <= b'
+                                                                                _ -> False
+                                                                _ -> False
+                                                _ -> False
+                                _ -> False  
+condition (Eq v1 v2) r cs = case (getVal v1 r cs) of
+                                Right a -> case (getVal v2 r cs) of
+                                                Right b -> extractVal a == extractVal b
+                                                _ -> False
+                                _ -> False  
 
 sel :: Table -> Condition -> Table
 sel ([], name, cols) _ = ([], name, cols)
@@ -163,8 +201,10 @@ sel (r:rs, name, cols) cond = let (rs', _, _) = sel (rs, name, cols) cond
 ------------------------------- PROYECCION ---------------------------------------------
 -- Devuelve los elementos de la fila correspondiente a las columnas
 cutCol :: (Row, [Column]) -> [Column] -> Row
-cutCol ((v:vs),(c:cols)) (cc:ccols) = if c == cc then (v: (cutCol (vs, cols) ccols) )
-                                                 else cutCol (vs, cols) ccols
+cutCol ((v:vs),(c:cols)) (cc:ccols) = if  snd c == snd cc && 
+                                          (fst c == fst cc ||
+                                           fst cc == "") then (v: (cutCol (vs, cols) ccols) )
+                                                         else cutCol (vs, cols) (cc:ccols)
 cutCol _ _ = []
 
 -- Devuelve ls filas cortadas a partir de las columnas [cols]
@@ -182,7 +222,7 @@ sortCols cols (c:cs) = if exist c cols then c:(sortCols cols cs)
                               exist co (col:columns) = if snd co == snd col && 
                                                           (fst co == fst col ||
                                                            fst col == "") then True
-                                                                                else exist co columns   
+                                                                          else exist co columns   
                             
 proy :: [Column] -> Table -> Table
 proy [] (_, tname, _) = ([], tname, [])  

@@ -50,7 +50,7 @@ import Data.Char
     PW       { TPw }
 
 %right VAR NUM
-%left '='
+%left '=' '&' '|'
 %right '->'
 %right PROY SELECT
 
@@ -98,7 +98,7 @@ Words :: { TableCols }
 
 ExpCond :: { TableCond }
         : TermCond                { $1 }
---        | ExpCond '&' ExpCond     { LAnd $1 $3 }
+        | ExpCond '&' ExpCond     { LAnd $1 $3 }
 --        | ExpCond '|' ExpCond     { LOr $1 $3 }
 
 TermCond :: { TableCond }

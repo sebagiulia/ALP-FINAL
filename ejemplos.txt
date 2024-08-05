@@ -1,1 +1,2 @@
 {ciUser = "ar-sql-user", ciPassword = "ar-sql-password", ciDatabase = "alp_final"}
+connect[pw:"ar-sql-password"|db:"alp_final"|us:"ar-sql-user"]

@@ -220,8 +220,8 @@ printStmt stmt = lift $ do
             ++ show d
             ++ "\n\nTerm AST:\n"
             ++ show e
-          --  ++ "\n\nSe muestra como:\n"
-          --  ++ render (printTerm e)
+            ++ "\n\nSe muestra como:\n"
+            ++ render (printTerm e)
   putStrLn outtext
 
 parseIO :: String -> (String -> ParseResult a) -> String -> InputT IO (Maybe a)

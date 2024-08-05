@@ -48,7 +48,7 @@ columns ((LVar v):cs) = let cs' = columns cs
 
 value :: TableAtom -> Value
 value (LVar c) = Col (separeAtDot c) 
-value (LNum s) = Val (MySQLText (read s))
+value (LNum s) = Val (MySQLInt32 (read s))
 value (LString s) = Val (MySQLText (pack s))  
 
 condition' :: TableCond -> Condition

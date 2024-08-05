@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module PrettyPrinter
   ( printTable,
-    printType
+    printType,
+    printTerm
        -- pretty printer para terminos
   )
 where
@@ -54,5 +55,5 @@ printType (_, cs) = printType' cs
         ptype IntT = text "Integer"     
 
 printTerm :: Term -> Doc
-printTerm = undefined
+printTerm t = text $ show t 
 
