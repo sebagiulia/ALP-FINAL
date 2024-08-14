@@ -31,7 +31,7 @@ main = runInputT defaultSettings main'
 main' :: InputT IO ()
 main' = do
   args <- lift getArgs
-  readevalprint args (S True "" [])
+  readevalprint args (S True "" [] [])
 
 iname :: String
 iname = "cálculo lambda simplemente tipado"
@@ -45,14 +45,15 @@ data State = S
     lfile :: String
   ,     -- Ultimo archivo cargado (para hacer "reload")
     ve    :: NameEnv Table TableType  -- Entorno con variables globales y su valor  [(Name, (Value, Type))]
+  , lv    :: NameEnv Table TableType -- Entorno con variables locales y su valor [(Name, (Value, Type))]
   }
 
 iprompt :: State -> String
-iprompt st = "TS:" ++ show (length (ve st)) ++ "> "
+iprompt st = "GV:" ++ show (length (ve st)) ++ "|LV:" ++ show (length (lv st)) ++  "> "
 
 --  read-eval-print loop
 readevalprint :: [String] -> State -> InputT IO ()
-readevalprint args state@(S inter lfile ve) =
+readevalprint args state@(S inter lfile ve lv) =
   let rec st = do
         mx <- MC.catch
           (if inter then getInputLine (iprompt st) else lift $ fmap Just getLine)
@@ -112,12 +113,15 @@ interpretCommand x = lift $ if isPrefixOf ":" x
   else return (Compile (CompileInteractive x))
 
 handleCommand :: State -> Command -> InputT IO (Maybe State)
-handleCommand state@(S inter lfile ve) cmd = case cmd of
+handleCommand state@(S inter lfile ve lv) cmd = case cmd of
   Quit   -> lift $ when (not inter) (putStrLn "!@#$^&*") >> return Nothing
   Noop   -> return (Just state)
   Help   -> lift $ putStr (helpTxt commands) >> return (Just state)
   Browse -> lift $ do
-    putStr (unlines [ s | s <- reverse (nub (map fst ve)) ])
+    putStrLn "Global variables:"
+    putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) ve)) ])
+    putStrLn "Local variables:"
+    putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) lv)) ])
     return (Just state)
   Compile c -> do
     state' <- case c of
@@ -134,7 +138,7 @@ handleCommand state@(S inter lfile ve) cmd = case cmd of
     x' <- parseIO "<interactive>" term_parse s
     t  <- case x' of
       Nothing -> return $ Left "Error en el parsing."
-      Just x  -> return $ infer ve $ conversion $ x
+      Just x  -> return $ infer ve lv $ conversion $ x
     case t of
       Left  err -> lift (putStrLn ("Error de tipos: " ++ err)) >> return ()
       Right t'  -> lift $ putStrLn $ render $ printType t'
@@ -184,7 +188,7 @@ compileFiles xs s =
   foldM (\s x -> compileFile (s { lfile = x, inter = False }) x) s xs
 
 compileFile :: State -> String -> InputT IO State
-compileFile state@(S inter lfile v) f = do
+compileFile state@(S inter lfile v lv) f = do
   lift $ putStrLn ("Abriendo " ++ f ++ "...")
   let f' = reverse (dropWhile isSpace (reverse f))
   x <- lift $ Control.Exception.catch
@@ -215,6 +219,7 @@ printStmt :: Stmt (TableTerm, Term) -> InputT IO ()
 printStmt stmt = lift $ do
   let outtext = case stmt of
         Def x (_, e) -> "def " ++ x ++ " = "-- ++ render (printTerm e)
+        Assign x (_, e) -> x ++ " -> " ++ render (printTerm e)
         Eval (d, e) ->
           "TableTerm AST:\n"
             ++ show d
@@ -234,22 +239,24 @@ parseIO f p x = lift $ case p x of
 handleStmt :: State -> Stmt TableTerm -> InputT IO State
 handleStmt state stmt = lift $ do
   case stmt of
-    Connect d -> checkTypeConn d
-    Def x e -> checkType x (conversion e)
-    Eval e  -> checkType it (conversion e)
+    Connect d  -> checkTypeConn d
+    Def x e    -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
+    Assign x e -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
+    Eval e     -> checkType it (conversion e) 0
  where
-  checkType i t = do
-    case infer (ve state) t of
+  checkType i t a = do
+    case infer (ve state) (lv state) t of
       Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
-      Right ty  -> checkEval i t ty
-  checkEval i t ty = do
-    let v = eval (ve state) [] t
-    _ <- when (inter state) $ do
+      Right ty  -> checkEval i t ty a
+  checkEval i t ty a = do
+    let v = eval (ve state) (lv state) t
+    _ <- when (inter state && a /= 1) $ do
       let outtext =
             if i == it then render (printTable v) else render (text i)
-      putStrLn outtext
-    if i == it then return state
-               else return (state { ve = (i, (v, ty)) : ve state })
+      putStrLn outtext 
+    if a == 1  then return (state { lv = (i, (v, ty)) : lv state })
+    else if (i /= it) then return (state { ve = (i, (v, ty)) : ve state, lv = [] })
+                      else return (state {lv = []})
   checkTypeConn d = do
     case inferConn d of
       Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state

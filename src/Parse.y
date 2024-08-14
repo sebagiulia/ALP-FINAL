@@ -50,10 +50,11 @@ import Data.Char
     PW       { TPw }
 
 %right VAR NUM
+%left '->'
 %left '/'
 %left 'U' 'I'
 %left '-'
-%left '=' '&' '|' '*' '|*|'  
+%left '=' '&' '|' '*' '|*|' 
 %right '->'
 %right PROY SELECT
 
@@ -61,14 +62,13 @@ import Data.Char
 %% 
 
 Def     :  Defexp                      { $1 }
+        |  Assign	               { $1 }
         |  CONNECT '[' ConnWords ']'   { Connect $3 }
         |  Exp	                       { Eval $1 }
 Defexp  :  DEF VAR '=' Exp             { Def $2 $4 }
+Assign : VAR '->' Exp  { Assign $1 $3 }
         
 
---Assign :: { TableAssign }
---        : VAR '->' Exp  { LAssign $1 $3 }
---        | Exp           { LEnd $1 }
 
 Exp     :: { TableTerm }
         : SEL '[' ExpCond ']' '(' Exp ')' { LSel $3 $6}
@@ -81,6 +81,7 @@ Exp     :: { TableTerm }
         | Exp 'U' Exp                     { LUni $1 $3 }
         | Exp 'I' Exp                     { LInt $1 $3 }
         | Exp '/' Exp                     { LDiv $1 $3 }
+        | '(' Exp ')'                     { $2 }
 
 ConnWords :: { ConnWords }
           : ConnWord                 { [$1] }  

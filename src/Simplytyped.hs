@@ -30,6 +30,7 @@ import TableOperators
 import Data.Text (Text, pack)
 import Database.MySQL.Protocol.MySQLValue (MySQLValue(MySQLText, MySQLInt32U))
 import Database.MySQL.Base hiding (render)
+import Data.Char (isUpper)
 
 
 -- Separe between TableName and ColumnName
@@ -66,7 +67,7 @@ conversion :: TableTerm -> Term
 conversion = conversion' []
 
 conversion' :: [String] -> TableTerm -> Term
-conversion' b (LTableVar n) =  GlobalTableVar n -- Cambiar cuando agregue variables locales
+conversion' b (LTableVar n) =  if isUpper (head n) then GlobalTableVar n else LocalTableVar n 
 conversion' b (LProy cols t) = Proy (columns cols) (conversion' b t)
 conversion' b (LSel cond t) = Sel (condition' cond) (conversion' b t)
 conversion' b (LPNat t1 t2) =  PNat (conversion' b t1) (conversion' b t2)
@@ -77,10 +78,11 @@ conversion' b (LDiff t1 t2) = Diff (conversion' b t1) (conversion' b t2)
 conversion' b (LUni t1 t2) = Uni (conversion' b t1) (conversion' b t2)
 conversion' b (LInt t1 t2) = Int (conversion' b t1) (conversion' b t2)
 
+
 -- evaluador de términos
-eval :: NameEnv Table TableType -> [Table] -> Term -> Table
+eval :: NameEnv Table TableType -> NameEnv Table TableType -> Term -> Table
 eval e l (GlobalTableVar v) = fst $ fromJust $ lookup v e
-eval e l (BoundTableVar i) = undefined
+eval e l (LocalTableVar i) =  fst $ fromJust $ lookup i l
 eval e l (Sel cond t) = sel (eval e l t) cond
 eval e l (Proy cs t) = proy cs (eval e l t)
 eval e l (Ren n t) = ren (eval e l t) n
@@ -127,9 +129,8 @@ evalConn cinfo e = try (conn' cinfo)
                        return st
 
 -- type checker
-infer :: NameEnv Table TableType -> Term -> Either String TableType
+infer :: NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType
 infer = infer' []
-
 -- definiciones auxiliares
 ret :: TableType -> Either String TableType
 ret = Right
@@ -173,57 +174,59 @@ notfunError t1 = err $ render (printType t1) ++ " no puede ser aplicado."
 notfoundError :: TableName -> Either String TableType
 notfoundError n = err $ show n ++ " no está definida."
 
-infer' :: Context -> NameEnv Table TableType -> Term -> Either String TableType
-infer' c _ (BoundTableVar n) = undefined
-infer' _ e (GlobalTableVar n) = case lookup n e of
+infer' :: Context -> NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType
+infer' _ _ l (LocalTableVar n) = case lookup n l of
+                                   Just (_, t) -> ret t
+                                   _           -> notfoundError n
+infer' _ e l (GlobalTableVar n) = case lookup n e of
                                   Just (_, t) -> ret t
                                   _           -> notfoundError n
-infer' c e (Sel cond t) = infer' c e t
-infer' c e (Proy cs t) = case infer' c e t of
+infer' c e l (Sel cond t) = infer' c e l t
+infer' c e l (Proy cs t) = case infer' c e l t of
                           Right t -> ret (proyInfer cs t)
                           err     -> err
-infer' c e (Ren n t) = case infer' c e t of
+infer' c e l (Ren n t) = case infer' c e l t of
                        Right t -> ret (n, snd t)
-infer' c e (PCart t1 t2) = case infer' c e t1 of
+infer' c e l (PCart t1 t2) = case infer' c e l t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e t2 of
+                             Right (n1, t1cs) -> case infer' c e l t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) ->  if n1 == n2
                                                                        then nameError n1
                                                                        else ret (n1 ++ "*"++ n2, t1cs ++ t2cs)
-infer' c e (PNat t1 t2) = case infer' c e (PCart t1 t2) of
+infer' c e l (PNat t1 t2) = case infer' c e l (PCart t1 t2) of
                             Left e -> Left e
-                            _ -> case infer' c e t1 of
+                            _ -> case infer' c e l t1 of
                                    Left e  -> err e
-                                   Right (n1, t1cs) -> case infer' c e t2 of
+                                   Right (n1, t1cs) -> case infer' c e l t2 of
                                                           Left e  -> err e
                                                           Right (n2, t2cs) -> case matchCols (n1, t1cs) (n2, t2cs) of
                                                                                   Right t -> ret t
                                                                                   err -> err
-infer' c e (Uni t1 t2) = case infer' c e t1 of
+infer' c e l (Uni t1 t2) = case infer' c e l t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e t2 of
+                             Right (n1, t1cs) -> case infer' c e l t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareCols (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " U " ++ n2, t)
                                                                        err -> err
-infer' c e (Int t1 t2) = case infer' c e t1 of
+infer' c e l (Int t1 t2) = case infer' c e l t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e t2 of
+                             Right (n1, t1cs) -> case infer' c e l t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareCols (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " I " ++ n2, t)
                                                                        err -> err
-infer' c e (Diff t1 t2) = case infer' c e t1 of
+infer' c e l (Diff t1 t2) = case infer' c e l t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e t2 of
+                             Right (n1, t1cs) -> case infer' c e l t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareCols (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " - " ++ n2, t)
                                                                        err -> err
-infer' c e (Div t1 t2) = case infer' c e t1 of
+infer' c e l (Div t1 t2) = case infer' c e l t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e t2 of
+                             Right (n1, t1cs) -> case infer' c e l t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareColsDiv (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " / " ++ n2, t)

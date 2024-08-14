@@ -48,9 +48,8 @@ data TableCond = LEquals TableAtom TableAtom
           deriving (Show)
 
 
-data TableAssign = LAssign TableName TableTerm | LEnd TableTerm
+data TableAssign = LAssign TableName TableTerm
           deriving (Show)
-
 
 -- TableTerm
 data TableTerm = LSel TableCond TableTerm
@@ -76,16 +75,18 @@ data Term = Sel Condition Term
           | Uni Term Term
           | Int Term Term
           | GlobalTableVar TableName
-          | BoundTableVar Int
+          | LocalTableVar TableName
           deriving (Show)
 
 -- Comandos interactivos o de archivos
-data Stmt i = Def String i           --  Declarar un nuevo identificador x, let x = t
+data Stmt i = Def String i           --  Declarar un nuevo identificador x, def x = e
             | Eval i                 --  Evaluar el término
             | Connect ConnWords      --  Conectarse a base de datos
+            | Assign String i        --  Declarar un identificador temporal x, x -> t
   deriving (Show)
 
 instance Functor Stmt where
   fmap f (Def s i) = Def s (f i)
+  fmap f (Assign s i) = Assign s (f i)
   fmap f (Eval i)  = Eval (f i)
   fmap f (Connect w)  = Connect w
