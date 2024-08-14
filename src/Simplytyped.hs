@@ -26,7 +26,7 @@ import           Prelude                 hiding ( (>>=) )
 import           Text.PrettyPrint.HughesPJ      ( render )
 import           PrettyPrinter
 import           Common
-import TableOperators 
+import TableOperators
 import Data.Text (Text, pack)
 import Database.MySQL.Protocol.MySQLValue (MySQLValue(MySQLText, MySQLInt32U))
 import Database.MySQL.Base hiding (render)
@@ -36,7 +36,7 @@ import Database.MySQL.Base hiding (render)
 -- Example: "Movies.name" -> C "Movies" "name" 
 -- Example: "name" -> C "" "name" 
 separeAtDot :: String -> Column
-separeAtDot c = let (beforeDot, rest) = span (/= '.') c 
+separeAtDot c = let (beforeDot, rest) = span (/= '.') c
                 in if null rest then ("", beforeDot)
                                 else (beforeDot, drop 1 rest)
 columns :: TableCols -> [Column]
@@ -47,9 +47,9 @@ columns ((LVar v):cs) = let cs' = columns cs
 
 
 value :: TableAtom -> Value
-value (LVar c) = Col (separeAtDot c) 
+value (LVar c) = Col (separeAtDot c)
 value (LNum s) = Val (MySQLInt32 (read s))
-value (LString s) = Val (MySQLText (pack s))  
+value (LString s) = Val (MySQLText (pack s))
 
 condition' :: TableCond -> Condition
 condition' (LAnd a b) = And (condition' a) (condition' b)
@@ -70,6 +70,7 @@ conversion' b (LTableVar n) =  GlobalTableVar n -- Cambiar cuando agregue variab
 conversion' b (LProy cols t) = Proy (columns cols) (conversion' b t)
 conversion' b (LSel cond t) = Sel (condition' cond) (conversion' b t)
 conversion' b (LPNat t1 t2) =  PNat (conversion' b t1) (conversion' b t2)
+conversion' b (LRen tn t) =  Ren tn (conversion' b t)
 conversion' b (LPCart t1 t2) = PCart (conversion' b t1) (conversion' b t2)
 conversion' b (LDiv t1 t2) = Div (conversion' b t1) (conversion' b t2)
 conversion' b (LDiff t1 t2) = Diff (conversion' b t1) (conversion' b t2)
@@ -78,16 +79,16 @@ conversion' b (LInt t1 t2) = Int (conversion' b t1) (conversion' b t2)
 
 -- evaluador de términos
 eval :: NameEnv Table TableType -> [Table] -> Term -> Table
-eval e l (GlobalTableVar v) = fst $ fromJust $ lookup v e                       
+eval e l (GlobalTableVar v) = fst $ fromJust $ lookup v e
 eval e l (BoundTableVar i) = undefined
-eval e l (Sel cond t) = sel (eval e l t) cond                      
-eval e l (Proy cs t) = proy cs (eval e l t)                      
-eval e l (Ren n t) = ren (eval e l t) n                       
-eval e l (PCart t1 t2) = pcart (eval e l t1) (eval e l t2)                      
-eval e l (PNat t1 t2) = pnat (eval e l t1) (eval e l t2)                      
-eval e l (Div t1 t2) = divtables (eval e l t1) (eval e l t2)                      
-eval e l (Diff t1 t2) = difftables (eval e l t1) (eval e l t2)                      
-eval e l (Uni t1 t2) = uni (eval e l t1) (eval e l t2)                      
+eval e l (Sel cond t) = sel (eval e l t) cond
+eval e l (Proy cs t) = proy cs (eval e l t)
+eval e l (Ren n t) = ren (eval e l t) n
+eval e l (PCart t1 t2) = pcart (eval e l t1) (eval e l t2)
+eval e l (PNat t1 t2) = pnat (eval e l t1) (eval e l t2)
+eval e l (Div t1 t2) = divtables (eval e l t1) (eval e l t2)
+eval e l (Diff t1 t2) = difftables (eval e l t1) (eval e l t2)
+eval e l (Uni t1 t2) = uni (eval e l t1) (eval e l t2)
 eval e l (Int t1 t2) = int (eval e l t1) (eval e l t2)
 
 
@@ -96,7 +97,7 @@ inferConn = inferConn' defaultConnectInfo
 
 inferConn' :: ConnectInfo -> ConnWords -> Either String ConnectInfo
 inferConn' c (w:ws) = case w of
-                        LHost (LString s) -> inferConn' (c {ciHost = s}) ws 
+                        LHost (LString s) -> inferConn' (c {ciHost = s}) ws
                         LPort (LNum n) -> inferConn' (c {ciPort = fromIntegral (read n :: W.Word16) }) ws
                         LDb (LString s) -> inferConn' (c {ciDatabase = (B.pack s)}) ws
                         LUser (LString s) -> inferConn' (c {ciUser = (B.pack s)}) ws
@@ -109,12 +110,12 @@ convertToEnv ::  NameEnv Table TableType -> [(Table, [ColumnDef])] -> NameEnv Ta
 convertToEnv e [] = e
 convertToEnv e ((t@(rows, name, cols), cts):ts) = case lookup name e of
                                         Just _ -> convertToEnv e ts
-                                        Nothing -> let typ = (name, getType cts cols) 
+                                        Nothing -> let typ = (name, getType cts cols)
                                                    in ((name, (t, typ)):convertToEnv e ts)
                                         where getType [] _ = []
                                               getType (c:cts) (col:cols) = case columnType c of
                                                                               t -> if t == mySQLTypeLong then (col, IntT):getType cts cols
-                                                                                   else (col, StrT):getType cts cols 
+                                                                                   else (col, StrT):getType cts cols
 
 evalConn :: ConnectInfo -> NameEnv Table TableType -> IO (Either SomeException (NameEnv Table TableType))
 evalConn cinfo e = try (conn' cinfo)
@@ -123,7 +124,7 @@ evalConn cinfo e = try (conn' cinfo)
                        rows <- traduce is
                        tables <- getTables conn rows -- [ Table ]
                        let st = convertToEnv e tables
-                       return st  
+                       return st
 
 -- type checker
 infer :: NameEnv Table TableType -> Term -> Either String TableType
@@ -152,8 +153,8 @@ matchError t1 t2 =
 
 nameError :: TableName -> Either String TableType
 nameError n =
-  err $  "Se esperaban nombres de tablas distintos" ++ n
-  
+  err $  "Se esperaban nombres de tablas distintos: " ++ n
+
 coltypeError :: (Column, Type) -> (Column, Type) -> Either String TableType
 coltypeError (c1,t1) (c2,t2) =
   err $  "Columnas con mismo nombre pero distinto tipo: " ++ (snd c1) ++ "->" ++ show t1 ++ " y " ++ show t2
@@ -189,14 +190,16 @@ infer' c e (PCart t1 t2) = case infer' c e t1 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) ->  if n1 == n2
                                                                        then nameError n1
-                                                                       else ret (n1 ++ "x"++ n2, t1cs ++ t2cs)
-infer' c e (PNat t1 t2) = case infer' c e t1 of
-                             Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e t2 of
-                                                  Left e  -> err e
-                                                  Right (n2, t2cs) -> case matchCols (n1, t1cs) (n2, t2cs) of
-                                                                       Right t -> ret t
-                                                                       err -> err
+                                                                       else ret (n1 ++ "*"++ n2, t1cs ++ t2cs)
+infer' c e (PNat t1 t2) = case infer' c e (PCart t1 t2) of
+                            Left e -> Left e
+                            _ -> case infer' c e t1 of
+                                   Left e  -> err e
+                                   Right (n1, t1cs) -> case infer' c e t2 of
+                                                          Left e  -> err e
+                                                          Right (n2, t2cs) -> case matchCols (n1, t1cs) (n2, t2cs) of
+                                                                                  Right t -> ret t
+                                                                                  err -> err
 infer' c e (Uni t1 t2) = case infer' c e t1 of
                              Left e  -> err e
                              Right (n1, t1cs) -> case infer' c e t2 of
@@ -229,18 +232,18 @@ infer' c e (Div t1 t2) = case infer' c e t1 of
 proyInfer :: [Column] -> TableType -> TableType
 proyInfer [] (n,_) = (n, [])
 proyInfer _ (n, []) = (n, [])
-proyInfer (c:cs) (n, ts) = case lookup c ts of
+proyInfer (c:cs) (n, ts) = case lookup (snd c) (map (\((x,y),z) -> (y,z)) ts) of
                         Nothing -> proyInfer cs (n, ts)
                         Just t -> let (_, ts') = proyInfer cs (n, ts)
                                   in (n, (c,t):ts')
 
 matchCols :: TableType -> TableType -> Either String TableType
-matchCols (n1, []) (n2, ts) = Right (n1 ++ "|x|" ++ n2, ts)  
-matchCols (n1, (t:ts)) (n2, ts') = case filterCols t ts' of
+matchCols (n1, []) (n2, ts) = Right (n1 ++ "|x|" ++ n2, ts)
+matchCols (n1, t:ts) (n2, ts') = case filterCols t ts' of
                                       Right ts'' -> case matchCols (n1, ts) (n2, ts'') of
                                                     Right (_, ts''') -> Right (n1 ++ "|x|" ++ n2, t:ts''')
-                                                    err -> err 
-                                      Left n     -> coltypeError n n  
+                                                    err -> err
+                                      Left n     -> coltypeError n n
                                 where filterCols _ [] = Right []
                                       filterCols tcname (tc:tcs) = if fst tcname == fst tc
                                                                    then if snd tcname == snd tc
@@ -266,12 +269,12 @@ compareCols (n1, ts1) (n2, ts2) = if length ts1 /= length ts2
                                                                                  else colnameError n1 n2
 
 compareColsDiv :: TableType -> TableType -> Either String TableType
-compareColsDiv (n1, ts) (n2, []) = Right (n1 ++ " / " ++ n2, ts)  
-compareColsDiv (n1, []) (n2, ts') = tablesizeError n1 n2  
+compareColsDiv (n1, ts) (n2, []) = Right (n1 ++ " / " ++ n2, ts)
+compareColsDiv (n1, []) (n2, ts') = tablesizeError n1 n2
 compareColsDiv (n1, ts') (n2, (t:ts)) = case filterCols t ts' of
                                           Right ts'' -> case compareColsDiv (n1, ts'') (n2, ts) of
                                                           Right (_, ts''') -> Right (n1 ++ " / " ++ n2, ts''')
-                                                          err              -> err 
+                                                          err              -> err
                                           Left n     -> coltypeError n n
                                 where filterCols _ [] = Right []
                                       filterCols tcname (tc:tcs) = if (fst tcname) == (fst tc)

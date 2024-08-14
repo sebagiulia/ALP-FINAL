@@ -50,7 +50,10 @@ import Data.Char
     PW       { TPw }
 
 %right VAR NUM
-%left '=' '&' '|'
+%left '/'
+%left 'U' 'I'
+%left '-'
+%left '=' '&' '|' '*' '|*|'  
 %right '->'
 %right PROY SELECT
 
@@ -72,12 +75,12 @@ Exp     :: { TableTerm }
         | PROY '[' Words ']' '(' Exp ')'  { LProy $3 $6}
         | REN '[' VAR ']' '(' Exp ')'     { LRen $3 $6}
         | VAR                             { LTableVar $1 }
-        --| Exp '*' Exp                     { LPCart $1 $3 }
-        --| Exp '|*|' Exp                   { LPNat $1 $3 }
-        --| Exp '/' Exp                     { LDiv $1 $3 }
-        --| Exp '-' Exp                     { LDiff $1 $3 }
-        --| Exp 'U' Exp                     { LUni $1 $3 }
-        --| Exp 'I' Exp                     { LInt $1 $3 }
+        | Exp '*' Exp                     { LPCart $1 $3 }
+        | Exp '|*|' Exp                   { LPNat $1 $3 }
+        | Exp '-' Exp                     { LDiff $1 $3 }
+        | Exp 'U' Exp                     { LUni $1 $3 }
+        | Exp 'I' Exp                     { LInt $1 $3 }
+        | Exp '/' Exp                     { LDiv $1 $3 }
 
 ConnWords :: { ConnWords }
           : ConnWord                 { [$1] }  
@@ -99,7 +102,7 @@ Words :: { TableCols }
 ExpCond :: { TableCond }
         : TermCond                { $1 }
         | ExpCond '&' ExpCond     { LAnd $1 $3 }
---        | ExpCond '|' ExpCond     { LOr $1 $3 }
+        | ExpCond '|' ExpCond     { LOr $1 $3 }
 
 TermCond :: { TableCond }
         : Atom '=' Atom           { LEquals $1 $3 }
