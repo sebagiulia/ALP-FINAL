@@ -243,6 +243,7 @@ handleStmt state stmt = lift $ do
     Def x e    -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
     Assign x e -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
     Eval e     -> checkType it (conversion e) 0
+    Csv f s    -> checkTypeFile f s
  where
   checkType i t a = do
     case infer (ve state) (lv state) t of
@@ -272,10 +273,25 @@ handleStmt state stmt = lift $ do
                   Right new -> new
                   _ -> []
     return (state { ve = newst})
+  checkTypeFile f s = do
+    case inferFile f s of
+      Left err -> putStrLn ("Error de tipos: " ++ err) >> return state
+      Right f' -> checkEvalFile f' s 
+  checkEvalFile f n = do
+    v <- evalFile f n (ve state)
+    _ <- when (inter state) $ do
+      let outtext = case v of
+                      Right ts -> "Tabla cargada: " ++ n
+                      Left ex -> "Error en la conexión:" ++ show ex
+      putStrLn outtext
+    let newst = case v of
+                  Right new -> new
+                  _ -> []
+    return (state { ve = newst ++ ve state}) 
     
 
 prelude :: String
-prelude = "Ejemplos/Prelude.lam"
+prelude = "Ejemplos/Prelude.arsql"
 
 it :: String
 it = "it"

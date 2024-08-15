@@ -26,6 +26,8 @@ dependencies:
 - bytestring >= 0.11.4.0
 - network >= 3.1.2.9
 - ansi-wl-pprint
+- cassava
+- vector >= 0.12.3.1
 
 
 default-extensions:

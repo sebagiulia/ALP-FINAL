@@ -35,6 +35,8 @@ import Data.Char
     ']'      { TCloseB }
     '->'     { TArrow }
     '"'      { TQuote }
+    CSV      { TCsv }
+    AS       { TAs }
     CONNECT  { TConnect }
     DEF      { TDef }
     STRING   { TString $$ }
@@ -64,6 +66,7 @@ import Data.Char
 Def     :  Defexp                      { $1 }
         |  Assign	               { $1 }
         |  CONNECT '[' ConnWords ']'   { Connect $3 }
+        |  CSV VAR AS VAR              { Csv $2 $4 }
         |  Exp	                       { Eval $1 }
 Defexp  :  DEF VAR '=' Exp             { Def $2 $4 }
 Assign : VAR '->' Exp  { Assign $1 $3 }
@@ -117,7 +120,7 @@ Atom :: { TableAtom }
      | STRING  { LString $1 }
      | VAR         { LVar $1 }
 
-Defs    : Defexp Defs                  { $1 : $2 }
+Defs    : Def Defs                  { $1 : $2 }
         |                              { [] }
 
 {
@@ -158,6 +161,8 @@ data Token = TVar String
                | TInt
                | TUni
                | TConnect
+               | TCsv
+               | TAs
                | TDiff
                | TDiv
                | TSelect
@@ -225,6 +230,8 @@ lexer cont s = case s of
                               ("us", (':':rest)) -> cont TUser rest
                               ("pw", (':':rest)) -> cont TPw rest
                               ("pt", (':':rest)) -> cont TPort rest
+                              ("as",rest) -> cont TAs rest
+                              ("csv",rest) -> cont TCsv rest
                               ("connect",rest) -> cont TConnect rest
                               ("def", rest) -> cont TDef rest
                               ("S",rest)   -> cont TSelect rest
@@ -247,7 +254,7 @@ lexer cont s = case s of
                                 (str, ('"':rest)) -> cont (TString str) rest
                                 (str, rest) -> cont (TString str) rest 
                                 where isNotQuote c = c /= '"' 
-                          isAlpha' c = isAlpha c || c == '.' || c == '_' || c == '-'
+                          isAlpha' c = isAlpha c || c == '.' || c == '_' || c == '-' || c == '/'
 
                            
 stmts_parse s = parseStmts s 1

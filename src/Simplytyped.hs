@@ -12,13 +12,19 @@ module Simplytyped
     inferConn
   ,
     evalConn
+  ,
+    inferFile
+  ,
+    evalFile
   )
 where
-
+import Data.Csv hiding (lookup)
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.Vector as V 
 import Network.Socket (PortNumber)
 import qualified Data.Word as W
 import qualified Data.ByteString.Char8 as B
-import Control.Exception (try, SomeException)
+import Control.Exception (try, SomeException, Exception, toException)
 import           Data.List
 import Data.Int (Int32)
 import           Data.Maybe
@@ -27,7 +33,7 @@ import           Text.PrettyPrint.HughesPJ      ( render )
 import           PrettyPrinter
 import           Common
 import TableOperators
-import Data.Text (Text, pack)
+import  Data.Text (Text, pack, unpack)
 import Database.MySQL.Protocol.MySQLValue (MySQLValue(MySQLText, MySQLInt32U))
 import Database.MySQL.Base hiding (render)
 import Data.Char (isUpper)
@@ -93,6 +99,62 @@ eval e l (Diff t1 t2) = difftables (eval e l t1) (eval e l t2)
 eval e l (Uni t1 t2) = uni (eval e l t1) (eval e l t2)
 eval e l (Int t1 t2) = int (eval e l t1) (eval e l t2)
 
+evalConn :: ConnectInfo -> NameEnv Table TableType -> IO (Either SomeException (NameEnv Table TableType))
+evalConn cinfo e = try (conn' cinfo)
+  where conn' inf = do conn <- connect inf
+                       (_, is) <- query_ conn "show tables"
+                       rows <- traduce is
+                       tables <- getTables conn rows -- [ Table ]
+                       let st = convertToEnv e tables
+                       return st
+
+data Except = Except String deriving (Show)
+instance Exception Except
+
+evalFile :: String -> String -> NameEnv Table TableType -> IO (Either SomeException (NameEnv Table TableType))
+evalFile file name st = do
+    csvData <- BL.readFile file
+    case decode NoHeader csvData of
+      Right rows -> if V.null rows ||(V.null (V.tail rows))
+                    then return $ Left $ toException $ Except "Tabla vacía.\n"
+                    else let (cols, rows', typ) = processRows (V.toList rows)
+                         in case rows' of
+                              Right rs -> let cols' = map (\c -> (name,c)) cols
+                                          in return $ Right [(name, ((rs, name, cols'), (name, zip cols' typ)))]
+                              Left err -> return $ Left $ toException $ Except err
+      Left err -> return $ Left $ toException $ Except err
+
+-- Convierte una cadena en Int32, si es posible
+convertToRowValues :: [Type] -> [String] -> Either String Row
+convertToRowValues t r = foldr convertToMySqlValue (Right [])  $ zip t r
+
+convertToMySqlValue :: (Type, String) ->  Either String Row  -> Either String Row
+convertToMySqlValue _ (Left e) = Left e
+convertToMySqlValue (t, s) (Right r) =
+    case reads (unpack (pack s)) of
+        [(val, "")]     -> case t of
+                             StrT -> Left "Tabla inconsistente.\n"
+                             _ -> Right $ (MySQLInt32 val):r
+        _               -> case t of
+                            IntT -> Left "Tabla inconsistente.\n"
+                            _ -> Right $ (MySQLText (pack s)):r
+
+-- Procesa filas y convierte los valores numéricos
+processRows :: [[String]] -> ([String], Either String [Row], [Type])
+processRows [] = ([], Right [], [])
+processRows (header:rest) = let typ = getType (head rest) 
+                            in (header, (foldl (processRow typ) (Right []) rest), typ)
+  where
+    processRow :: [Type] -> Either String [Row] -> [String] -> Either String [Row]
+    processRow t rs r = case rs of
+                          Right rows -> case convertToRowValues t r of
+                                          Right nrow -> Right (nrow:rows)
+                                          _ -> Left "Tabla inconsistente.\n"
+                          err -> err
+    getType row = map toType row 
+    toType s = case reads (unpack (pack s)) :: [(Int32, String)]of
+                [(val, "")] -> IntT
+                _           -> StrT
 
 inferConn :: ConnWords -> Either String ConnectInfo
 inferConn = inferConn' defaultConnectInfo
@@ -107,7 +169,11 @@ inferConn' c (w:ws) = case w of
                         _ -> Left "Parametro de conexion desconocido\n"
 inferConn' c [] = Right c
 
-
+inferFile :: String -> String -> Either String String
+inferFile file name = let (nf, ext) = separeAtDot file
+                      in if nf == "" || ext /= "csv" then Left "No se trata de un archivo csv.\n"
+                         else Right file
+                  
 convertToEnv ::  NameEnv Table TableType -> [(Table, [ColumnDef])] -> NameEnv Table TableType
 convertToEnv e [] = e
 convertToEnv e ((t@(rows, name, cols), cts):ts) = case lookup name e of
@@ -119,14 +185,6 @@ convertToEnv e ((t@(rows, name, cols), cts):ts) = case lookup name e of
                                                                               t -> if t == mySQLTypeLong then (col, IntT):getType cts cols
                                                                                    else (col, StrT):getType cts cols
 
-evalConn :: ConnectInfo -> NameEnv Table TableType -> IO (Either SomeException (NameEnv Table TableType))
-evalConn cinfo e = try (conn' cinfo)
-  where conn' inf = do conn <- connect inf
-                       (_, is) <- query_ conn "show tables"
-                       rows <- traduce is
-                       tables <- getTables conn rows -- [ Table ]
-                       let st = convertToEnv e tables
-                       return st
 
 -- type checker
 infer :: NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType

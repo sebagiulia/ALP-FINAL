@@ -83,6 +83,7 @@ data Stmt i = Def String i           --  Declarar un nuevo identificador x, def 
             | Eval i                 --  Evaluar el término
             | Connect ConnWords      --  Conectarse a base de datos
             | Assign String i        --  Declarar un identificador temporal x, x -> t
+            | Csv String String
   deriving (Show)
 
 instance Functor Stmt where
@@ -90,3 +91,4 @@ instance Functor Stmt where
   fmap f (Assign s i) = Assign s (f i)
   fmap f (Eval i)  = Eval (f i)
   fmap f (Connect w)  = Connect w
+  fmap f (Csv fil s) = Csv fil s
