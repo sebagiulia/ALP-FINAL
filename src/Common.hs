@@ -86,6 +86,7 @@ data Stmt i = Def String i           --  Declarar un nuevo identificador x, def 
             | ImportDB ConnWords      --  Conectarse a base de datos
             | ImportCSV String String
             | ExportCSV String String
+            | Drop String
   deriving (Show)
 
 instance Functor Stmt where
@@ -95,3 +96,4 @@ instance Functor Stmt where
   fmap f (ImportCSV fil v)  = ImportCSV fil v
   fmap f (ImportDB w)  = ImportDB w
   fmap f (ExportCSV v s)  = ExportCSV v s
+  fmap f (Drop v) = Drop v

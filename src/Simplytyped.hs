@@ -20,6 +20,8 @@ module Simplytyped
     inferExpCsv
   ,
     evalExpCsv
+  ,
+    evalDrop
   )
 where
 import Data.Csv (encode, decode, HasHeader(NoHeader))
@@ -154,6 +156,10 @@ evalFile file name st = do
                                         Left err -> return $ Left $ toException $ Error err
           Left err -> return $ Left $ toException $ Error err
 
+evalDrop:: NameEnv Table TableType -> String -> (Either String (NameEnv Table TableType)) 
+evalDrop s v = case lookup v s of
+                 Nothing -> Left "Variable inexistente."
+                 Just _ -> Right $ filter (\(k,val) -> k /= v) s 
 -- Convierte una cadena en Int32, si es posible
 convertToRowValues :: [Type] -> [String] -> Either String Row
 convertToRowValues t r = foldr convertToMySqlValue (Right [])  $ zip t r

@@ -37,6 +37,7 @@ import Data.Char
     '"'      { TQuote }
     CSV      { TCsv }
     AS       { TAs }
+    DROP       { TDrop }
     IMPORT   { TImport }
     EXPORT   { TExport }
     DATABASE { TDatabase }
@@ -70,6 +71,7 @@ Def     :  Defexp                           { $1 }
         | IMPORT CSV VAR AS VAR             { ImportCSV $3 $5 }
         | IMPORT DATABASE '[' ConnWords ']' { ImportDB $4 }
         | EXPORT CSV VAR AS VAR             { ExportCSV $3 $5 }
+        | DROP VAR                          { Drop $2 }
         |  Exp	                            { Eval $1 }
 Defexp  :  DEF VAR '=' Exp                  { Def $2 $4 }
 Assign : VAR '->' Exp                       { Assign $1 $3 }
@@ -166,6 +168,7 @@ data Token = TVar String
                | TDatabase
                | TCsv
                | TAs
+               | TDrop
                | TDiff
                | TDiv
                | TSelect
@@ -233,6 +236,7 @@ lexer cont s = case s of
                               ("us", (':':rest)) -> cont TUser rest
                               ("pw", (':':rest)) -> cont TPw rest
                               ("pt", (':':rest)) -> cont TPort rest
+                              ("drop",rest) -> cont TDrop rest
                               ("as",rest) -> cont TAs rest
                               ("csv",rest) -> cont TCsv rest
                               ("import",rest) -> cont TImport rest

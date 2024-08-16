@@ -247,6 +247,7 @@ handleStmt state stmt = lift $ do
     Def x e       -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
     Assign x e    -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
     Eval e        -> checkType it (conversion e) 0
+    Drop v        -> checkEvalDrop v
   if (not (inter st)) then return st { nq = (nq st) + 1 }
                          else return st
  where
@@ -302,6 +303,10 @@ handleStmt state stmt = lift $ do
                     Left err -> show err
     putStrLn outtext
     return state
+  checkEvalDrop v = do
+                  case evalDrop (ve state) v of
+                      Left err -> putStrLn err >> return state
+                      Right st -> putStrLn ("Variable " ++ v ++ " eliminada.") >> return (state { ve = st })
     
 
 prelude :: String
