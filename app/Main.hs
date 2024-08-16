@@ -31,7 +31,7 @@ main = runInputT defaultSettings main'
 main' :: InputT IO ()
 main' = do
   args <- lift getArgs
-  readevalprint args (S True "" [] [])
+  readevalprint args (S True "" 0 [] [])
 
 iname :: String
 iname = "cálculo lambda simplemente tipado"
@@ -43,6 +43,7 @@ data State = S
   { inter :: Bool
   ,       -- True, si estamos en modo interactivo.
     lfile :: String
+  , nq :: Int -- Numero de queries.
   ,     -- Ultimo archivo cargado (para hacer "reload")
     ve    :: NameEnv Table TableType  -- Entorno con variables globales y su valor  [(Name, (Value, Type))]
   , lv    :: NameEnv Table TableType -- Entorno con variables locales y su valor [(Name, (Value, Type))]
@@ -53,7 +54,7 @@ iprompt st = "GV:" ++ show (length (ve st)) ++ "|LV:" ++ show (length (lv st)) +
 
 --  read-eval-print loop
 readevalprint :: [String] -> State -> InputT IO ()
-readevalprint args state@(S inter lfile ve lv) =
+readevalprint args state@(S inter lfile nq ve lv) =
   let rec st = do
         mx <- MC.catch
           (if inter then getInputLine (iprompt st) else lift $ fmap Just getLine)
@@ -113,7 +114,7 @@ interpretCommand x = lift $ if isPrefixOf ":" x
   else return (Compile (CompileInteractive x))
 
 handleCommand :: State -> Command -> InputT IO (Maybe State)
-handleCommand state@(S inter lfile ve lv) cmd = case cmd of
+handleCommand state@(S inter lfile nq ve lv) cmd = case cmd of
   Quit   -> lift $ when (not inter) (putStrLn "!@#$^&*") >> return Nothing
   Noop   -> return (Just state)
   Help   -> lift $ putStr (helpTxt commands) >> return (Just state)
@@ -126,7 +127,7 @@ handleCommand state@(S inter lfile ve lv) cmd = case cmd of
   Compile c -> do
     state' <- case c of
       CompileInteractive s -> compilePhrase state s
-      CompileFile        f -> compileFile (state { lfile = f }) f
+      CompileFile        f -> compileFile (state { lfile = f, inter = False }) f
     return (Just state')
   Print s ->
     let s' = reverse (dropWhile isSpace (reverse (dropWhile isSpace s)))
@@ -188,7 +189,7 @@ compileFiles xs s =
   foldM (\s x -> compileFile (s { lfile = x, inter = False }) x) s xs
 
 compileFile :: State -> String -> InputT IO State
-compileFile state@(S inter lfile v lv) f = do
+compileFile state@(S inter lfile nq v lv) f = do
   lift $ putStrLn ("Abriendo " ++ f ++ "...")
   let f' = reverse (dropWhile isSpace (reverse f))
   x <- lift $ Control.Exception.catch
@@ -200,8 +201,8 @@ compileFile state@(S inter lfile v lv) f = do
       return ""
     )
   stmts <- parseIO f' (stmts_parse) x
-  maybe (return state) (foldM handleStmt state) stmts
-
+  st <- maybe (return state { inter = True, nq = 0 }) (foldM handleStmt state) stmts
+  return st { inter = True, nq = 0 }
 
 compilePhrase :: State -> String -> InputT IO State
 compilePhrase state x = do
@@ -238,12 +239,16 @@ parseIO f p x = lift $ case p x of
 
 handleStmt :: State -> Stmt TableTerm -> InputT IO State
 handleStmt state stmt = lift $ do
-  case stmt of
-    Connect d  -> checkTypeConn d
-    Def x e    -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
-    Assign x e -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
-    Eval e     -> checkType it (conversion e) 0
-    Csv f s    -> checkTypeFile f s
+  _ <- when (not (inter state)) $ do putStrLn $ "> Query " ++ show ((nq state) + 1)  ++ "." 
+  st <- case stmt of
+    ImportDB d    -> checkTypeConn d
+    ImportCSV f v -> checkTypeImpCsv f v
+    ExportCSV v f -> checkTypeExpCsv v f
+    Def x e       -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
+    Assign x e    -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
+    Eval e        -> checkType it (conversion e) 0
+  if (not (inter st)) then return st { nq = (nq st) + 1 }
+                         else return st
  where
   checkType i t a = do
     case infer (ve state) (lv state) t of
@@ -251,7 +256,7 @@ handleStmt state stmt = lift $ do
       Right ty  -> checkEval i t ty a
   checkEval i t ty a = do
     let v = eval (ve state) (lv state) t
-    _ <- when (inter state && a /= 1) $ do
+    _ <- when (a /= 1) $ do
       let outtext =
             if i == it then render (printTable v) else render (text i)
       putStrLn outtext 
@@ -260,34 +265,43 @@ handleStmt state stmt = lift $ do
                       else return (state {lv = []})
   checkTypeConn d = do
     case inferConn d of
-      Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
+      Left  err -> putStrLn ("Error: " ++ err) >> return state
       Right ty  -> checkEvalConn ty 
   checkEvalConn ty = do
     v <- evalConn ty (ve state)
-    _ <- when (inter state) $ do
-      let outtext = case v of
-                      Right ts -> "Dataset cargado: \n" ++ (unlines [ s | s <- reverse (nub (map fst ts)) ])
-                      Left ex -> "Error en la conexión:" ++ show ex
-      putStrLn outtext
+    let outtext = case v of
+                    Right _ -> "Dataset cargado"
+                    Left ex -> show ex
+    putStrLn outtext
     let newst = case v of
                   Right new -> new
                   _ -> []
     return (state { ve = newst})
-  checkTypeFile f s = do
-    case inferFile f s of
-      Left err -> putStrLn ("Error de tipos: " ++ err) >> return state
-      Right f' -> checkEvalFile f' s 
-  checkEvalFile f n = do
+  checkTypeImpCsv f s = do
+    case inferFile (ve state) f s of
+      Left err -> putStrLn ("Error: " ++ err) >> return state
+      Right f' -> checkEvalImpCsv f' s 
+  checkEvalImpCsv f n = do
     v <- evalFile f n (ve state)
-    _ <- when (inter state) $ do
-      let outtext = case v of
-                      Right ts -> "Tabla cargada: " ++ n
-                      Left ex -> "Error en la conexión:" ++ show ex
-      putStrLn outtext
+    let outtext = case v of
+                    Right ts -> "Tabla cargada: " ++ n
+                    Left err -> show err
+    putStrLn outtext
     let newst = case v of
                   Right new -> new
                   _ -> []
-    return (state { ve = newst ++ ve state}) 
+    return (state { ve = newst ++ ve state})
+  checkTypeExpCsv v f = do
+    case inferExpCsv (ve state) v f of
+      Left err -> putStrLn ("Error: " ++ err) >> return state
+      Right f' -> checkEvalExpCsv f' v
+  checkEvalExpCsv f v = do
+    v <- evalExpCsv v f (ve state)
+    let outtext = case v of
+                    Right _ -> "Archivo creado con exito."
+                    Left err -> show err
+    putStrLn outtext
+    return state
     
 
 prelude :: String

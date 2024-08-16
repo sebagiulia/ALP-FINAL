@@ -19,6 +19,7 @@ type Context = [TableType]
 
 
 
+
 -- Entornos
 type NameEnv table ty = [(TableName, (table, ty))]
 
@@ -81,14 +82,16 @@ data Term = Sel Condition Term
 -- Comandos interactivos o de archivos
 data Stmt i = Def String i           --  Declarar un nuevo identificador x, def x = e
             | Eval i                 --  Evaluar el término
-            | Connect ConnWords      --  Conectarse a base de datos
             | Assign String i        --  Declarar un identificador temporal x, x -> t
-            | Csv String String
+            | ImportDB ConnWords      --  Conectarse a base de datos
+            | ImportCSV String String
+            | ExportCSV String String
   deriving (Show)
 
 instance Functor Stmt where
   fmap f (Def s i) = Def s (f i)
   fmap f (Assign s i) = Assign s (f i)
   fmap f (Eval i)  = Eval (f i)
-  fmap f (Connect w)  = Connect w
-  fmap f (Csv fil s) = Csv fil s
+  fmap f (ImportCSV fil v)  = ImportCSV fil v
+  fmap f (ImportDB w)  = ImportDB w
+  fmap f (ExportCSV v s)  = ExportCSV v s

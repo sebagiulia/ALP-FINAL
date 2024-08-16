@@ -37,7 +37,9 @@ import Data.Char
     '"'      { TQuote }
     CSV      { TCsv }
     AS       { TAs }
-    CONNECT  { TConnect }
+    IMPORT   { TImport }
+    EXPORT   { TExport }
+    DATABASE { TDatabase }
     DEF      { TDef }
     STRING   { TString $$ }
     VAR      { TVar $$ }
@@ -63,16 +65,15 @@ import Data.Char
 
 %% 
 
-Def     :  Defexp                      { $1 }
-        |  Assign	               { $1 }
-        |  CONNECT '[' ConnWords ']'   { Connect $3 }
-        |  CSV VAR AS VAR              { Csv $2 $4 }
-        |  Exp	                       { Eval $1 }
-Defexp  :  DEF VAR '=' Exp             { Def $2 $4 }
-Assign : VAR '->' Exp  { Assign $1 $3 }
-        
-
-
+Def     :  Defexp                           { $1 }
+        |  Assign	                    { $1 }
+        | IMPORT CSV VAR AS VAR             { ImportCSV $3 $5 }
+        | IMPORT DATABASE '[' ConnWords ']' { ImportDB $4 }
+        | EXPORT CSV VAR AS VAR             { ExportCSV $3 $5 }
+        |  Exp	                            { Eval $1 }
+Defexp  :  DEF VAR '=' Exp                  { Def $2 $4 }
+Assign : VAR '->' Exp                       { Assign $1 $3 }
+             
 Exp     :: { TableTerm }
         : SEL '[' ExpCond ']' '(' Exp ')' { LSel $3 $6}
         | PROY '[' Words ']' '(' Exp ')'  { LProy $3 $6}
@@ -116,9 +117,9 @@ TermCond :: { TableCond }
         | Atom '>=' Atom          { LGrEq $1 $3 }
 
 Atom :: { TableAtom }
-     : NUM         { LNum $1 }
-     | STRING  { LString $1 }
-     | VAR         { LVar $1 }
+     : NUM      { LNum $1 }
+     | STRING   { LString $1 }
+     | VAR      { LVar $1 }
 
 Defs    : Def Defs                  { $1 : $2 }
         |                              { [] }
@@ -160,7 +161,9 @@ data Token = TVar String
                | TPCart
                | TInt
                | TUni
-               | TConnect
+               | TImport
+               | TExport
+               | TDatabase
                | TCsv
                | TAs
                | TDiff
@@ -232,7 +235,9 @@ lexer cont s = case s of
                               ("pt", (':':rest)) -> cont TPort rest
                               ("as",rest) -> cont TAs rest
                               ("csv",rest) -> cont TCsv rest
-                              ("connect",rest) -> cont TConnect rest
+                              ("import",rest) -> cont TImport rest
+                              ("export",rest) -> cont TExport rest
+                              ("database",rest) -> cont TDatabase rest
                               ("def", rest) -> cont TDef rest
                               ("S",rest)   -> cont TSelect rest
                               ("P", rest)   -> cont TProy rest
@@ -254,7 +259,7 @@ lexer cont s = case s of
                                 (str, ('"':rest)) -> cont (TString str) rest
                                 (str, rest) -> cont (TString str) rest 
                                 where isNotQuote c = c /= '"' 
-                          isAlpha' c = isAlpha c || c == '.' || c == '_' || c == '-' || c == '/'
+                          isAlpha' c = isAlpha c || c == '.' || c == '_' || c == '-'
 
                            
 stmts_parse s = parseStmts s 1

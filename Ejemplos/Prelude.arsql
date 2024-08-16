@@ -1,1 +1,2 @@
-connect[pw:"ar-sql-password"|db:"alp_final"|us:"ar-sql-user"]
+import csv hola.csv as Hola
+import database [pw:"ar-sql-password"|db:"alp_final"|us:"ar-sql-user"]

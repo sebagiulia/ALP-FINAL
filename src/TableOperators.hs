@@ -223,7 +223,7 @@ condition (Lreq v1 v2) r cs = case getVal v1 r cs of
 condition (Eq v1 v2) r cs = case getVal v1 r cs of
                                 Right a -> case getVal v2 r cs of
                                                 Right b -> extractVal a == extractVal b
-                                                _ -> False
+                                                _ -> True
                                 _ -> False
 
 sel :: Table -> Condition -> Table
@@ -263,15 +263,11 @@ proy cols (trows, _, tcols) = let sortedCols = sortCols cols tcols
                                   trows' = cutCols (trows, tcols) sortedCols
                               in (trows', "proy", sortedCols)
 ---------------------------------------------------------
-extractName' :: MySQLValue -> String
-extractName' (MySQLText s) = T.unpack s
-extractName' (MySQLInt32 i) = show i
-extractName' _ = undefined
 
 extractName :: MySQLValue -> IO String
 extractName (MySQLText s) = return (T.unpack s)
 extractName (MySQLInt32 i) = return (show i)
-extractName _ = undefined
+extractName n = return (show n) -- No deberia entrar
 
 printLine :: Row -> IO [String]
 printLine [] = return []
@@ -296,6 +292,10 @@ printTables ((t, n, cs):ts) = do putStrLn ("Tabla: " ++ n)
 traduce :: InputStream a -> IO [a]
 traduce = Streams.toList
 
+mySQLValueToString :: MySQLValue -> String
+mySQLValueToString (MySQLInt32  n) = show n
+mySQLValueToString (MySQLText  t) = (T.unpack t)
+mySQLValueToString n = show n -- No deberia entrar
 
 
 getColumns :: [ColumnDef] -> TableName -> [Column]
