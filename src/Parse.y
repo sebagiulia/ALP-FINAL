@@ -53,6 +53,8 @@ import Data.Char
     PORT     { TPort }
     USER     { TUser }
     PW       { TPw }
+    OPERATOR { TOperator }
+    '=>'     { TOp }
 
 %right VAR NUM
 %left '->'
@@ -66,16 +68,21 @@ import Data.Char
 
 %% 
 
-Def     :  Defexp                           { $1 }
-        |  Assign	                    { $1 }
-        | IMPORT CSV VAR AS VAR             { ImportCSV $3 $5 }
-        | IMPORT DATABASE '[' ConnWords ']' { ImportDB $4 }
-        | EXPORT CSV VAR AS VAR             { ExportCSV $3 $5 }
-        | DROP VAR                          { Drop $2 }
-        |  Exp	                            { Eval $1 }
-Defexp  :  DEF VAR '=' Exp                  { Def $2 $4 }
-Assign : VAR '->' Exp                       { Assign $1 $3 }
+Def     :  Defexp                                { $1 }
+        |  Assign	                         { $1 }
+        | IMPORT CSV VAR AS VAR                  { ImportCSV $3 $5 }
+        | IMPORT DATABASE '[' ConnWords ']'      { ImportDB $4 }
+        | EXPORT CSV VAR AS VAR                  { ExportCSV $3 $5 }
+        | DROP VAR                               { Drop $2 }
+        | Exp	                                 { Eval $1 }
+        | OPERATOR VAR '=' '(' Args ')' '=>' Exp { Operator $2 $5 $8 }
+        | App                                    { $1 }
+Defexp  :  DEF VAR '=' Exp                       { Def $2 $4 }
+Assign : VAR '->' Exp                            { Assign $1 $3 }
              
+
+App : VAR '[' Args  ']' { App $1 $3 }  
+
 Exp     :: { TableTerm }
         : SEL '[' ExpCond ']' '(' Exp ')' { LSel $3 $6}
         | PROY '[' Words ']' '(' Exp ')'  { LProy $3 $6}
@@ -101,6 +108,9 @@ ConnWord :: { ConnWord }
          | USER Atom    { LUser $2 }
          | PW Atom      { LPw $2   }
 
+Args :: { OperatorArgs }
+     : VAR                { [$1] }
+     | VAR '|' Args       { $1 : $3 }
 
 Words :: { TableCols }
       : Atom                           { [$1] }
@@ -197,6 +207,8 @@ data Token = TVar String
                | TUser
                | TPw
                | TPort
+               | TOperator
+               | TOp
                deriving Show
 
 ----------------------------------
@@ -225,6 +237,7 @@ lexer cont s = case s of
                     ('|':cs) -> cont TOr cs
                     ('<':'=':cs) -> cont TLreq cs
                     ('>':'=':cs) -> cont TGreq cs
+                    ('=':'>':cs) -> cont TOp cs
                     ('=':cs) -> cont TEquals cs
                     ('>':cs) -> cont TGr cs
                     ('<':cs) -> cont TLr cs
@@ -243,6 +256,7 @@ lexer cont s = case s of
                               ("export",rest) -> cont TExport rest
                               ("database",rest) -> cont TDatabase rest
                               ("def", rest) -> cont TDef rest
+                              ("operator", rest) -> cont TOperator rest
                               ("S",rest)   -> cont TSelect rest
                               ("P", rest)   -> cont TProy rest
                               ("R", rest)   -> cont TRen rest

@@ -31,7 +31,7 @@ main = runInputT defaultSettings main'
 main' :: InputT IO ()
 main' = do
   args <- lift getArgs
-  readevalprint args (S True "" 0 [] [])
+  readevalprint args (S True "" 0 [] [] [])
 
 iname :: String
 iname = "cálculo lambda simplemente tipado"
@@ -45,16 +45,17 @@ data State = S
     lfile :: String
   , nq :: Int -- Numero de queries.
   ,     -- Ultimo archivo cargado (para hacer "reload")
-    ve    :: NameEnv Table TableType  -- Entorno con variables globales y su valor  [(Name, (Value, Type))]
+    gv    :: NameEnv Table TableType  -- Entorno con variables globales y su valor  [(Name, (Value, Type))]
   , lv    :: NameEnv Table TableType -- Entorno con variables locales y su valor [(Name, (Value, Type))]
+  , ov :: [(String, Term)]
   }
 
 iprompt :: State -> String
-iprompt st = "GV:" ++ show (length (ve st)) ++ "|LV:" ++ show (length (lv st)) ++  "> "
+iprompt st = "GV:" ++ show (length (gv st)) ++ "|LV:" ++ show (length (lv st)) ++ "|OV:" ++ show (length (ov st)) ++  "> "
 
 --  read-eval-print loop
 readevalprint :: [String] -> State -> InputT IO ()
-readevalprint args state@(S inter lfile nq ve lv) =
+readevalprint args state@(S inter lfile nq gv lv ov) =
   let rec st = do
         mx <- MC.catch
           (if inter then getInputLine (iprompt st) else lift $ fmap Just getLine)
@@ -114,13 +115,13 @@ interpretCommand x = lift $ if isPrefixOf ":" x
   else return (Compile (CompileInteractive x))
 
 handleCommand :: State -> Command -> InputT IO (Maybe State)
-handleCommand state@(S inter lfile nq ve lv) cmd = case cmd of
+handleCommand state@(S inter lfile nq gv lv ov) cmd = case cmd of
   Quit   -> lift $ when (not inter) (putStrLn "!@#$^&*") >> return Nothing
   Noop   -> return (Just state)
   Help   -> lift $ putStr (helpTxt commands) >> return (Just state)
   Browse -> lift $ do
     putStrLn "Global variables:"
-    putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) ve)) ])
+    putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) gv)) ])
     putStrLn "Local variables:"
     putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) lv)) ])
     return (Just state)
@@ -139,7 +140,7 @@ handleCommand state@(S inter lfile nq ve lv) cmd = case cmd of
     x' <- parseIO "<interactive>" term_parse s
     t  <- case x' of
       Nothing -> return $ Left "Error en el parsing."
-      Just x  -> return $ infer ve lv $ conversion $ x
+      Just x  -> return $ infer gv lv $ conversion $ x
     case t of
       Left  err -> lift (putStrLn ("Error de tipos: " ++ err)) >> return ()
       Right t'  -> lift $ putStrLn $ render $ printType t'
@@ -189,7 +190,7 @@ compileFiles xs s =
   foldM (\s x -> compileFile (s { lfile = x, inter = False }) x) s xs
 
 compileFile :: State -> String -> InputT IO State
-compileFile state@(S inter lfile nq v lv) f = do
+compileFile state@(S inter lfile nq v lv ov) f = do
   lift $ putStrLn ("Abriendo " ++ f ++ "...")
   let f' = reverse (dropWhile isSpace (reverse f))
   x <- lift $ Control.Exception.catch
@@ -241,35 +242,37 @@ handleStmt :: State -> Stmt TableTerm -> InputT IO State
 handleStmt state stmt = lift $ do
   _ <- when (not (inter state)) $ do putStrLn $ "> Query " ++ show ((nq state) + 1)  ++ "." 
   st <- case stmt of
-    ImportDB d    -> checkTypeConn d
-    ImportCSV f v -> checkTypeImpCsv f v
-    ExportCSV v f -> checkTypeExpCsv v f
-    Def x e       -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
-    Assign x e    -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
-    Eval e        -> checkType it (conversion e) 0
-    Drop v        -> checkEvalDrop v
+    ImportDB d     -> checkTypeConn d
+    ImportCSV f v  -> checkTypeImpCsv f v
+    ExportCSV v f  -> checkTypeExpCsv v f
+    Def x e        -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
+    Assign x e     -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
+    Eval e         -> checkType it (conversion e) 0
+    Drop v         -> checkEvalDrop v
+    Operator v a e -> checkEvalOp v a e
+    App op a       -> checkEvalApp op a
   if (not (inter st)) then return st { nq = (nq st) + 1 }
                          else return st
  where
   checkType i t a = do
-    case infer (ve state) (lv state) t of
+    case infer (gv state) (lv state) t of
       Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
       Right ty  -> checkEval i t ty a
   checkEval i t ty a = do
-    let v = eval (ve state) (lv state) t
+    let v = eval (gv state) (lv state) t
     _ <- when (a /= 1) $ do
       let outtext =
             if i == it then render (printTable v) else render (text i)
       putStrLn outtext 
     if a == 1  then return (state { lv = (i, (v, ty)) : lv state })
-    else if (i /= it) then return (state { ve = (i, (v, ty)) : ve state, lv = [] })
+    else if (i /= it) then return (state { gv = (i, (v, ty)) : gv state, lv = [] })
                       else return (state {lv = []})
   checkTypeConn d = do
     case inferConn d of
       Left  err -> putStrLn ("Error: " ++ err) >> return state
       Right ty  -> checkEvalConn ty 
   checkEvalConn ty = do
-    v <- evalConn ty (ve state)
+    v <- evalConn ty (gv state)
     let outtext = case v of
                     Right _ -> "Dataset cargado"
                     Left ex -> show ex
@@ -277,13 +280,13 @@ handleStmt state stmt = lift $ do
     let newst = case v of
                   Right new -> new
                   _ -> []
-    return (state { ve = newst})
+    return (state { gv = newst})
   checkTypeImpCsv f s = do
-    case inferFile (ve state) f s of
+    case inferFile (gv state) f s of
       Left err -> putStrLn ("Error: " ++ err) >> return state
       Right f' -> checkEvalImpCsv f' s 
   checkEvalImpCsv f n = do
-    v <- evalFile f n (ve state)
+    v <- evalFile f n (gv state)
     let outtext = case v of
                     Right ts -> "Tabla cargada: " ++ n
                     Left err -> show err
@@ -291,23 +294,30 @@ handleStmt state stmt = lift $ do
     let newst = case v of
                   Right new -> new
                   _ -> []
-    return (state { ve = newst ++ ve state})
+    return (state { gv = newst ++ gv state})
   checkTypeExpCsv v f = do
-    case inferExpCsv (ve state) v f of
+    case inferExpCsv (gv state) v f of
       Left err -> putStrLn ("Error: " ++ err) >> return state
       Right f' -> checkEvalExpCsv f' v
   checkEvalExpCsv f v = do
-    v <- evalExpCsv v f (ve state)
+    v <- evalExpCsv v f (gv state)
     let outtext = case v of
                     Right _ -> "Archivo creado con exito."
                     Left err -> show err
     putStrLn outtext
     return state
   checkEvalDrop v = do
-                  case evalDrop (ve state) v of
+                  case evalDrop (gv state) v of
                       Left err -> putStrLn err >> return state
-                      Right st -> putStrLn ("Variable " ++ v ++ " eliminada.") >> return (state { ve = st })
-    
+                      Right st -> putStrLn ("Variable " ++ v ++ " eliminada.") >> return (state { gv = st })
+  checkEvalOp v a e = do
+                  case evalOperator (ov state) v a e of
+                    Left err -> putStrLn err >> return state
+                    Right st -> putStrLn ("Operador " ++ v ++ " cargado.") >> return (state { ov = st})
+  checkEvalApp op a = do
+                  case evalApp (gv state) (lv state) (ov state) op a of
+                    Left err -> putStrLn err >> return state
+                    Right table -> putStrLn (render (printTable table)) >> return state 
 
 prelude :: String
 prelude = "Ejemplos/Prelude.arsql"

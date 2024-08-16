@@ -1,3 +1,11 @@
-{ciUser = "ar-sql-user", ciPassword = "ar-sql-password", ciDatabase = "alp_final"}
-connect[pw:"ar-sql-password"|db:"alp_final"|us:"ar-sql-user"]
-EmpleadosProyectos / R[Hola](P[empleado_id](S[Empleados.empleado_id = 1](Empleados)))
+<>- definir tanto local como globalmente variables con el mismo nombre                                      -<>
+<>- definir en un operador una variable existente en variables locales                                      -<>
+<>- cuando se ingresa un numero mayor a la capacidad de Int                                                 -<>
+<>- Las inferencias deberian ser sobre expreciones y operadores, no sobre cualquier prompt                  -<>
+<>- Cambiar los valores de Table a String o Int, no a mysqlvalue                                            -<>
+<>- unificar los infer y eval de Main con patternMatching en SympleTiped                                    -<>
+<>- unificar las impresiones de error                                                                       -<>
+<>- arreglar el tema de printType y printTerm                                                               -<>
+<>- cambiar def por table y drop por drop table o drop operator                                             -<>
+<>- agregar renombramiento de columnas                                                                      -<>
+<>- cambiar logica de nombre de columnas, que se guarde el nombre de tabla origen cuando se repiten nombres -<> 

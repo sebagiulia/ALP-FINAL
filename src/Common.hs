@@ -30,7 +30,10 @@ data ConnWord = LHost TableAtom
               | LPort TableAtom
               deriving(Show) 
 
-type ConnWords = [ConnWord] 
+type ConnWords = [ConnWord]
+
+type OperatorArgs = [String]
+
 
 -- TableColumns
 type TableCols = [TableAtom]
@@ -77,6 +80,7 @@ data Term = Sel Condition Term
           | Int Term Term
           | GlobalTableVar TableName
           | LocalTableVar TableName
+          | Bound Int
           deriving (Show)
 
 -- Comandos interactivos o de archivos
@@ -87,6 +91,8 @@ data Stmt i = Def String i           --  Declarar un nuevo identificador x, def 
             | ImportCSV String String
             | ExportCSV String String
             | Drop String
+            | Operator String OperatorArgs i
+            | App String OperatorArgs
   deriving (Show)
 
 instance Functor Stmt where
@@ -97,3 +103,5 @@ instance Functor Stmt where
   fmap f (ImportDB w)  = ImportDB w
   fmap f (ExportCSV v s)  = ExportCSV v s
   fmap f (Drop v) = Drop v
+  fmap f (Operator v a i)  = Operator v a (f i)
+  fmap f (App v a )  = App v a

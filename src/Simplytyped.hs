@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 
+
 module Simplytyped
   ( conversion
   ,    -- conversion a terminos localmente sin nombre
@@ -22,6 +23,10 @@ module Simplytyped
     evalExpCsv
   ,
     evalDrop
+  ,
+    evalOperator
+  ,
+    evalApp
   )
 where
 import Data.Csv (encode, decode, HasHeader(NoHeader))
@@ -81,32 +86,63 @@ condition' (LEquals a b) = Eq (value a) (value b)
 conversion :: TableTerm -> Term
 conversion = conversion' []
 
-conversion' :: [String] -> TableTerm -> Term
-conversion' b (LTableVar n) =  if isUpper (head n) then GlobalTableVar n else LocalTableVar n
-conversion' b (LProy cols t) = Proy (columns cols) (conversion' b t)
-conversion' b (LSel cond t) = Sel (condition' cond) (conversion' b t)
-conversion' b (LPNat t1 t2) =  PNat (conversion' b t1) (conversion' b t2)
-conversion' b (LRen tn t) =  Ren tn (conversion' b t)
-conversion' b (LPCart t1 t2) = PCart (conversion' b t1) (conversion' b t2)
-conversion' b (LDiv t1 t2) = Div (conversion' b t1) (conversion' b t2)
-conversion' b (LDiff t1 t2) = Diff (conversion' b t1) (conversion' b t2)
-conversion' b (LUni t1 t2) = Uni (conversion' b t1) (conversion' b t2)
-conversion' b (LInt t1 t2) = Int (conversion' b t1) (conversion' b t2)
+conversion' :: [(String, Int)] -> TableTerm -> Term
+conversion' l (LTableVar n) =  if isUpper (head n) then GlobalTableVar n 
+                               else case lookup n l of
+                                            Nothing -> LocalTableVar n
+                                            Just i -> Bound i
+conversion' l (LProy cols t) = Proy (columns cols) (conversion' l t)
+conversion' l (LSel cond t) = Sel (condition' cond) (conversion' l t)
+conversion' l (LPNat t1 t2) =  PNat (conversion' l t1) (conversion' l t2)
+conversion' l (LRen tn t) =  Ren tn (conversion' l t)
+conversion' l (LPCart t1 t2) = PCart (conversion' l t1) (conversion' l t2)
+conversion' l (LDiv t1 t2) = Div (conversion' l t1) (conversion' l t2)
+conversion' l (LDiff t1 t2) = Diff (conversion' l t1) (conversion' l t2)
+conversion' l (LUni t1 t2) = Uni (conversion' l t1) (conversion' l t2)
+conversion' l (LInt t1 t2) = Int (conversion' l t1) (conversion' l t2)
+
+conversionOperator :: [TableName] -> TableTerm -> Term
+conversionOperator args t = conversion' (zip args [0..]) t
 
 
+evalApp :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> String -> OperatorArgs -> Either String Table                   
+evalApp s l ops v args = case lookup v ops of
+                           Nothing -> Left "Operador invalido."
+                           Just term -> case foldr existargs (Right []) args  of
+                                          Right argtables -> case infer' argtables s l term of
+                                                              Right typ -> Right (eval' argtables s l term)
+                                                              Left err -> Left err      
+                                          Left err -> Left err
+                            where existargs _ (Left err) = Left err
+                                  existargs a (Right ags') = if isUpper (head a)
+                                    then case lookup a s of
+                                           Nothing -> Left $ "No se encuentra variable global " ++ a ++ "." 
+                                           Just tt -> Right $ tt:ags'
+                                    else case lookup a l of
+                                           Nothing -> Left $ "No se encuentra variable local " ++ a ++ "." 
+                                           Just tt -> Right $ tt:ags'
+
+evalOperator :: [(String, Term)] -> String -> OperatorArgs -> TableTerm -> Either String [(String, Term)]
+evalOperator ops v args t = case lookup v ops of
+                              Just _ -> Left "Opeador existente."
+                              Nothing -> Right $ (v,conversionOperator args t):ops
 -- evaluador de términos
 eval :: NameEnv Table TableType -> NameEnv Table TableType -> Term -> Table
-eval e l (GlobalTableVar v) = fst $ fromJust $ lookup v e
-eval e l (LocalTableVar i) =  fst $ fromJust $ lookup i l
-eval e l (Sel cond t) = sel (eval e l t) cond
-eval e l (Proy cs t) = proy cs (eval e l t)
-eval e l (Ren n t) = ren (eval e l t) n
-eval e l (PCart t1 t2) = pcart (eval e l t1) (eval e l t2)
-eval e l (PNat t1 t2) = pnat (eval e l t1) (eval e l t2)
-eval e l (Div t1 t2) = divtables (eval e l t1) (eval e l t2)
-eval e l (Diff t1 t2) = difftables (eval e l t1) (eval e l t2)
-eval e l (Uni t1 t2) = uni (eval e l t1) (eval e l t2)
-eval e l (Int t1 t2) = int (eval e l t1) (eval e l t2)
+eval = eval' []
+
+eval' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType -> Term -> Table
+eval' _ e l (GlobalTableVar v) = fst $ fromJust $ lookup v e
+eval' _ e l (LocalTableVar i) =  fst $ fromJust $ lookup i l
+eval' a e l (Sel cond t) = sel (eval' a e l t) cond
+eval' a e l (Proy cs t) = proy cs (eval' a e l t)
+eval' a e l (Ren n t) = ren (eval' a e l t) n
+eval' a e l (PCart t1 t2) = pcart (eval' a e l t1) (eval' a e l t2)
+eval' a e l (PNat t1 t2) = pnat (eval' a e l t1) (eval' a e l t2)
+eval' a e l (Div t1 t2) = divtables (eval' a e l t1) (eval' a e l t2)
+eval' a e l (Diff t1 t2) = difftables (eval' a e l t1) (eval' a e l t2)
+eval' a e l (Uni t1 t2) = uni (eval' a e l t1) (eval' a e l t2)
+eval' a e l (Int t1 t2) = int (eval' a e l t1) (eval' a e l t2)
+eval' a _ _ (Bound n) = fst (a !! n)
 
 data Error = Error String deriving (Show)
 instance Exception Error
@@ -233,6 +269,7 @@ inferExpCsv s v f = case lookup v s of
                                 in if ext /= "vsc" then Left "Falta extension csv en archivo."
                                    else if n == "" then Left "Nombre de archivo invalido."
                                         else Right $ "exports/" ++ f 
+
 -- type checker
 infer :: NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType
 infer = infer' []
@@ -279,7 +316,7 @@ notfunError t1 = err $ render (printType t1) ++ " no puede ser aplicado."
 notfoundError :: TableName -> Either String TableType
 notfoundError n = err $ show n ++ " no está definida."
 
-infer' :: Context -> NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType
+infer' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType
 infer' _ _ l (LocalTableVar n) = case lookup n l of
                                    Just (_, t) -> ret t
                                    _           -> notfoundError n
@@ -291,7 +328,8 @@ infer' c e l (Proy cs t) = case infer' c e l t of
                           Right t -> ret (proyInfer cs t)
                           err     -> err
 infer' c e l (Ren n t) = case infer' c e l t of
-                       Right t -> ret (n, snd t)
+                          Right t -> ret (n, snd t)
+                          err -> err
 infer' c e l (PCart t1 t2) = case infer' c e l t1 of
                              Left e  -> err e
                              Right (n1, t1cs) -> case infer' c e l t2 of
@@ -336,6 +374,7 @@ infer' c e l (Div t1 t2) = case infer' c e l t1 of
                                                   Right (n2, t2cs) -> case compareColsDiv (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " / " ++ n2, t)
                                                                        err -> err
+infer' c _ _ (Bound i) = ret $ snd (c !! i)
 
 proyInfer :: [Column] -> TableType -> TableType
 proyInfer [] (n,_) = (n, [])
