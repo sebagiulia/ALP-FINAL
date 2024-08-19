@@ -242,15 +242,15 @@ handleStmt :: State -> Stmt TableTerm -> InputT IO State
 handleStmt state stmt = lift $ do
   _ <- when (not (inter state)) $ do putStrLn $ "> Query " ++ show ((nq state) + 1)  ++ "." 
   st <- case stmt of
-    ImportDB d     -> checkTypeConn d
-    ImportCSV f v  -> checkTypeImpCsv f v
-    ExportCSV v f  -> checkTypeExpCsv v f
+    ImportDB d     -> checkImportDB d 
+    ImportCSV f v  -> checkImportCSV f v
+    ExportCSV v f  -> checkExportCSV v f
     Def x e        -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
     Assign x e     -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
-    Eval e         -> checkType it (conversion e) 0
-    Drop v         -> checkEvalDrop v
-    Operator v a e -> checkEvalOp v a e
-    App op a       -> checkEvalApp op a
+    Eval e         -> checkType it (conversion e) 0 --
+    Drop v         -> checkDrop v
+    Operator v a e -> checkEvalOp v a e --
+    App op a       -> checkEvalApp op a --
   if (not (inter st)) then return st { nq = (nq st) + 1 }
                          else return st
  where
@@ -263,50 +263,55 @@ handleStmt state stmt = lift $ do
     _ <- when (a /= 1) $ do
       let outtext =
             if i == it then render (printTable v) else render (text i)
-      putStrLn outtext 
-    if a == 1  then return (state { lv = (i, (v, ty)) : lv state })
-    else if (i /= it) then return (state { gv = (i, (v, ty)) : gv state, lv = [] })
-                      else return (state {lv = []})
-  checkTypeConn d = do
-    case inferConn d of
+      if (i /= it && elem i (map fst (gv state)))
+              then putStrLn ("Variable " ++ i ++ " actualizada.")
+              else putStrLn outtext 
+    if a == 1  
+    then if (elem i (map fst (lv state)))
+         then return (state { lv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (lv state)})
+         else return (state { lv = (i,(v,ty)) : lv state })
+    else if (i /= it) 
+         then if (elem i (map fst (gv state)))
+              then return (state { gv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (gv state), lv = [] })
+              else return (state { gv = (i,(v,ty)) : gv state, lv = [] })
+         else return (state {lv = []})
+  checkImportDB d = do
+    case getDBData d of
       Left  err -> putStrLn ("Error: " ++ err) >> return state
-      Right ty  -> checkEvalConn ty 
-  checkEvalConn ty = do
-    v <- evalConn ty (gv state)
-    let outtext = case v of
-                    Right _ -> "Dataset cargado"
-                    Left ex -> show ex
-    putStrLn outtext
-    let newst = case v of
-                  Right new -> new
-                  _ -> []
-    return (state { gv = newst})
-  checkTypeImpCsv f s = do
-    case inferFile (gv state) f s of
+      Right dbData  -> do
+        v <- evalImportDB dbData (gv state)
+        let outtext = case v of
+                        Right _ -> "Dataset cargado."
+                        Left ex -> show ex
+        putStrLn outtext
+        let newst = case v of
+                      Right new -> new
+                      _ -> (gv state)
+        return (state { gv = newst})
+  checkImportCSV f n = do
+    case checkNameFileImport (gv state) f n of
       Left err -> putStrLn ("Error: " ++ err) >> return state
-      Right f' -> checkEvalImpCsv f' s 
-  checkEvalImpCsv f n = do
-    v <- evalFile f n (gv state)
-    let outtext = case v of
-                    Right ts -> "Tabla cargada: " ++ n
-                    Left err -> show err
-    putStrLn outtext
-    let newst = case v of
-                  Right new -> new
-                  _ -> []
-    return (state { gv = newst ++ gv state})
-  checkTypeExpCsv v f = do
-    case inferExpCsv (gv state) v f of
+      Right _ -> do
+          v <- evalImportCSV f n (gv state)
+          let outtext = case v of
+                          Right ts -> "Tabla cargada: " ++ n
+                          Left err -> show err
+          putStrLn outtext
+          let newst = case v of
+                        Right new -> new
+                        _ -> []
+          return (state { gv = newst ++ gv state})
+  checkExportCSV v f = do
+    case checkNameFileExport (gv state) v f of
       Left err -> putStrLn ("Error: " ++ err) >> return state
-      Right f' -> checkEvalExpCsv f' v
-  checkEvalExpCsv f v = do
-    v <- evalExpCsv v f (gv state)
-    let outtext = case v of
-                    Right _ -> "Archivo creado con exito."
-                    Left err -> show err
-    putStrLn outtext
-    return state
-  checkEvalDrop v = do
+      Right f' -> do
+          v <- evalExportCSV v f' (gv state)
+          let outtext = case v of
+                          Right _ -> "Archivo creado con exito."
+                          Left err -> show err
+          putStrLn outtext
+          return state
+  checkDrop v = do
                   case evalDrop (gv state) v of
                       Left err -> putStrLn err >> return state
                       Right st -> putStrLn ("Variable " ++ v ++ " eliminada.") >> return (state { gv = st })

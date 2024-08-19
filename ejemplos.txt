@@ -1,7 +1,3 @@
-<>- definir tanto local como globalmente variables con el mismo nombre                                      -<>
-<>- definir en un operador una variable existente en variables locales                                      -<>
-<>- cuando se ingresa un numero mayor a la capacidad de Int                                                 -<>
-<>- Las inferencias deberian ser sobre expreciones y operadores, no sobre cualquier prompt                  -<>
 <>- Cambiar los valores de Table a String o Int, no a mysqlvalue                                            -<>
 <>- unificar los infer y eval de Main con patternMatching en SympleTiped                                    -<>
 <>- unificar las impresiones de error                                                                       -<>
@@ -9,4 +5,8 @@
 <>- cambiar def por table y drop por drop table o drop operator                                             -<>
 <>- agregar renombramiento de columnas                                                                      -<>
 <>- cambiar logica de nombre de columnas, que se guarde el nombre de tabla origen cuando se repiten nombres -<>
- 
+<>- cambiar nombres de las tablas cuando se asignan local y globalmente?                                    -<>
+<>- Aclarar que export es para variables globales unicamente                                                -<>
+<>- Cargar en browse operators                                                                              -<>
+<>- Agregar App a Exp
+<>- Que las variables puedan contener caracteres numericos                                                  -<>
