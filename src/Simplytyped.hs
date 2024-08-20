@@ -14,19 +14,23 @@ module Simplytyped
   evalImportDB,
   evalExportCSV,
   evalOperator,
-  evalDrop,
+  evalDropTable,
+  evalDropOp,
   evalApp,
   checkNameFileExport,
   checkNameFileImport,
   )
 where
+
+import Mysql
+import Csv
+import Error
+
 import Data.Csv (encode, decode, HasHeader(NoHeader))
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Vector as V
 import Network.Socket (PortNumber)
-import qualified Data.Word as W
-import qualified Data.ByteString.Char8 as B
-import Control.Exception (try, SomeException, Exception, toException, catch, IOException, throw)
+import Control.Exception (SomeException, IOException, catch, Exception (toException), try)
 import           Data.List
 import Data.Int (Int32)
 import           Data.Maybe
@@ -61,8 +65,8 @@ columns ((LVar v):cs) = let cs' = columns cs
 
 value :: TableAtom -> Value
 value (LVar c) = Col (separeAtDot c)
-value (LNum s) = Val (MySQLInt32 (read s))
-value (LString s) = Val (MySQLText (pack s))
+value (LNum s) = Val (Numb (read s))
+value (LString s) = Val (Str s)
 
 condition' :: TableCond -> Condition
 condition' (LAnd a b) = And (condition' a) (condition' b)
@@ -79,7 +83,7 @@ conversion :: TableTerm -> Term
 conversion = conversion' []
 
 conversion' :: [(String, Int)] -> TableTerm -> Term
-conversion' l (LTableVar n) =  if isUpper (head n) then GlobalTableVar n 
+conversion' l (LTableVar n) =  if isUpper (head n) then GlobalTableVar n
                                else case lookup n l of
                                             Nothing -> LocalTableVar n
                                             Just i -> Bound i
@@ -97,21 +101,21 @@ conversionOperator :: [TableName] -> TableTerm -> Term
 conversionOperator args t = conversion' (zip args [0..]) t
 
 
-evalApp :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> String -> OperatorArgs -> Either String Table                   
+evalApp :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> String -> OperatorArgs -> Either String Table
 evalApp s l ops v args = case lookup v ops of
                            Nothing -> Left "Operador invalido."
                            Just term -> case foldr existargs (Right []) args  of
                                           Right argtables -> case infer' argtables s l term of
                                                               Right typ -> Right (eval' argtables s l term)
-                                                              Left err -> Left err      
+                                                              Left err -> Left err
                                           Left err -> Left err
                             where existargs _ (Left err) = Left err
                                   existargs a (Right ags') = if isUpper (head a)
                                     then case lookup a s of
-                                           Nothing -> Left $ "No se encuentra variable global " ++ a ++ "." 
+                                           Nothing -> Left $ "No se encuentra variable global " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
                                     else case lookup a l of
-                                           Nothing -> Left $ "No se encuentra variable local " ++ a ++ "." 
+                                           Nothing -> Left $ "No se encuentra variable local " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
 
 evalOperator :: [(String, Term)] -> String -> OperatorArgs -> TableTerm -> Either String [(String, Term)]
@@ -136,108 +140,41 @@ eval' a e l (Uni t1 t2) = uni (eval' a e l t1) (eval' a e l t2)
 eval' a e l (Int t1 t2) = int (eval' a e l t1) (eval' a e l t2)
 eval' a _ _ (Bound n) = fst (a !! n)
 
-data Error = Error String deriving (Show)
-instance Exception Error
+
 
 evalImportDB :: ConnectInfo -> NameEnv Table TableType -> IO (Either SomeException (NameEnv Table TableType))
-evalImportDB cinfo e = try (conn' cinfo)
-  where conn' inf = do conn <- connect inf
-                       (_, is) <- query_ conn "show tables"
-                       rows <- traduce is
-                       tables <- getTables conn rows -- [ Table ]
-                       case foldl repeated (Right []) tables of
-                        Right ts -> do let st = convertToEnv e ts
-                                       return st
-                        Left err -> throw $ Error $ "Variable existente: " ++ err
-        repeated (Left err) _ = Left err
-        repeated (Right tbs) t@((_,n,_),_) = case lookup n e of
-                                          Nothing -> Right $ t:tbs
-                                          _       -> Left n
+evalImportDB cinfo e = try (mysqlconn cinfo e)
 
 evalExportCSV :: String -> String -> NameEnv Table TableType -> IO (Either SomeException String)
 evalExportCSV v f s = do
             fileExists <- try $ doesFileExist f
             case fileExists of
-              Right bool -> if bool then return $ Left $ toException $ Error  "Archivo existente en exports/."  
+              Right bool -> if bool then return $ Left $ toException $ Error  "Archivo existente en exports/."
                             else  case lookup v s of
                                    Nothing -> return $ Left $ toException $ Error  "Variable inexistente." --No deberia entrar
-                                   Just ((rows, _, cols),_)  -> let tcols = intercalate "," (map snd cols)
-                                                                    trows = (map (\r -> intercalate "," (map mySQLValueToString r)) rows)
-                                                                    tablecsv = intercalate "\r\n" (tcols:trows)
-                                                                in do result <- try (writeFile f tablecsv) :: IO (Either IOError ())
-                                                                      case result of
-                                                                          Left ex  ->  return $ Left $ toException $ Error  "No se pudo crear el archivo." 
-                                                                          Right _  -> return $ Right "Archivo creado con exito."
-              Left err -> return $ Left err 
+                                   Just (t,_)  -> let tablecsv = tableToCsv t
+                                                  in do result <- try (writeFile f tablecsv) :: IO (Either IOError ())
+                                                        case result of
+                                                            Left ex  ->  return $ Left $ toException $ Error  "No se pudo crear el archivo."
+                                                            Right _  -> return $ Right "Archivo creado con exito."
+              Left err -> return $ Left err
+
 evalImportCSV :: String -> String -> NameEnv Table TableType -> IO (Either SomeException (NameEnv Table TableType))
 evalImportCSV file name st = do
-    csvData <- Control.Exception.catch (BL.readFile file) ((\e -> return "") :: IOException -> IO BL.ByteString )
+    csvData <- catch (BL.readFile file) ((\e -> return "") :: IOException -> IO BL.ByteString )
     if csvData == "" then return $ Left $ toException $ Error $ "No se pudo abrir el archivo: " ++ file ++ "."
-    else case decode NoHeader csvData of
-          Right rows -> if V.null rows ||(V.null (V.tail rows))
-                        then return $ Left $ toException $ Error "Tabla vacía.\n"
-                        else let (cols, rows', typ) = processRows (V.toList rows)
-                             in if length cols /= length typ then return $ Left $ toException $ Error "Tabla inconsistente."
-                                else case rows' of
-                                        Right rs -> let cols' = map (\c -> (name, unpack c)) cols
-                                                    in return $ Right [(name, ((rs, name, cols'), (name, zip cols' typ)))]
-                                        Left err -> return $ Left $ toException $ Error err
-          Left err -> return $ Left $ toException $ Error err
+    else case csvToTable name csvData of
+           Right st' -> return $ Right st'
+           Left err  -> return $ Left $ toException $ Error err
 
-evalDrop:: NameEnv Table TableType -> String -> (Either String (NameEnv Table TableType)) 
-evalDrop s v = case lookup v s of
+evalDropTable:: NameEnv Table TableType -> String -> Either String (NameEnv Table TableType)
+evalDropTable s v = case lookup v s of
                  Nothing -> Left "Variable inexistente."
-                 Just _ -> Right $ filter (\(k,val) -> k /= v) s 
--- Convierte una cadena en Int32, si es posible
-convertToRowValues :: [Type] -> [String] -> Either String Row
-convertToRowValues t r = foldr convertToMySqlValue (Right [])  $ zip t r
-
-convertToMySqlValue :: (Type, String) ->  Either String Row  -> Either String Row
-convertToMySqlValue _ (Left e) = Left e
-convertToMySqlValue (t, s) (Right r) =
-    case reads (unpack (pack s)) of
-        [(val, "")]     -> case t of
-                             StrT -> Left $ "Tabla inconsistente: \"" ++ s ++ "\" en columna de tipo StrT."
-                             _ -> if length (unpack (pack s)) > 9 then Left $ "No se pueden almacenar numeros de mas de 9 digitos como IntT: " ++ s ++  "." -- Numero muy grande
-                                                                  else Right $ (MySQLInt32 val):r
-        _               -> case t of
-                            IntT -> Left $ "Tabla inconsistente: \"" ++ s  ++ "\" en casilla de tipo StrT ."
-                            _ -> case reads (unpack (T.tail (strip (pack s)))) :: [(Int32, String)] of
-                                  [(val, "")]     -> if T.head (strip (pack s)) == '\\' 
-                                                     then Right $ MySQLText (T.tail (strip (pack s))):r
-                                                     else Right $ MySQLText (strip (pack s)):r
-                                  _               -> Right $ MySQLText (strip (pack s)):r
--- Procesa filas y convierte los valores numéricos
-processRows :: [[String]] -> ([Text], Either String [Row], [Type])
-processRows [] = ([], Right [], [])
-processRows (header:rest) = let typ = getType (head rest)
-                            in (map (strip . pack) header, foldr (processRow typ) (Right []) rest, typ)
-  where
-    processRow :: [Type] -> [String] -> Either String [Row] -> Either String [Row]
-    processRow t r rs = case rs of
-                          Right rows -> if length r /= length t
-                                        then Left "Faltan datos en tabla."
-                                        else case convertToRowValues t r of
-                                              Right nrow -> Right (nrow:rows)
-                                              Left err -> Left err
-                          err -> err
-    toType s = case reads (unpack (pack s)) :: [(Int32, String)]of
-                [(val, "")] ->  IntT
-                _           -> StrT
-    getType = map toType
-
-getDBData :: ConnWords -> Either String ConnectInfo
-getDBData = getDBData' defaultConnectInfo
-
-getDBData' :: ConnectInfo -> ConnWords -> Either String ConnectInfo
-getDBData' c (w:ws) = case w of
-                        LHost (LString s) -> getDBData' (c {ciHost = s}) ws
-                        LPort (LNum n) -> getDBData' (c {ciPort = fromIntegral (read n :: W.Word16) }) ws
-                        LDb (LString s) -> getDBData' (c {ciDatabase = (B.pack s)}) ws
-                        LUser (LString s) -> getDBData' (c {ciUser = (B.pack s)}) ws
-                        LPw (LString s) -> getDBData' (c {ciPassword = (B.pack s)}) ws
-                        _ -> Left "Parametro de conexion desconocido\n"
-getDBData' c [] = Right c
+                 Just _ -> Right $ filter (\(k,val) -> k /= v) s
+evalDropOp:: [(String, Term)] -> String -> Either String [(String, Term)]
+evalDropOp s v = case lookup v s of
+                 Nothing -> Left "Operador inexistente."
+                 Just _ -> Right $ filter (\(k,val) -> k /= v) s
 
 checkNameFileImport :: NameEnv Table TableType -> String -> String -> Either String String
 checkNameFileImport s file name = let (nf, ext) = separeAtDot file
@@ -246,17 +183,6 @@ checkNameFileImport s file name = let (nf, ext) = separeAtDot file
                            else case lookup name s of
                                   Nothing -> Right $ file
                                   _       -> Left $ "Variable existente: " ++ name ++ ".\n"
-convertToEnv ::  NameEnv Table TableType -> [(Table, [ColumnDef])] -> NameEnv Table TableType
-convertToEnv e [] = e
-convertToEnv e ((t@(rows, name, cols), cts):ts) = case lookup name e of
-                                        Just _ -> convertToEnv e ts
-                                        Nothing -> let typ = (name, getType cts cols)
-                                                   in ((name, (t, typ)):convertToEnv e ts)
-                                        where getType [] _ = []
-                                              getType (c:cts) (col:cols) = case columnType c of
-                                                                              t -> if t == mySQLTypeLong then (col, IntT):getType cts cols
-                                                                                   else (col, StrT):getType cts cols
-
 
 checkNameFileExport :: NameEnv Table TableType -> String -> String -> Either String String
 checkNameFileExport s v f = case lookup v s of
@@ -264,7 +190,7 @@ checkNameFileExport s v f = case lookup v s of
                      _       -> let (ext, n) = break (=='.') (reverse f)
                                 in if ext /= "vsc" then Left "Falta extension csv en archivo."
                                    else if n == "" then Left "Nombre de archivo invalido."
-                                        else Right $ "exports/" ++ f 
+                                        else Right $ "exports/" ++ f
 
 -- type checker
 infer :: NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType

@@ -1,12 +1,11 @@
-<>- Cambiar los valores de Table a String o Int, no a mysqlvalue                                            -<>
-<>- unificar los infer y eval de Main con patternMatching en SympleTiped                                    -<>
-<>- unificar las impresiones de error                                                                       -<>
-<>- arreglar el tema de printType y printTerm                                                               -<>
-<>- cambiar def por table y drop por drop table o drop operator                                             -<>
-<>- agregar renombramiento de columnas                                                                      -<>
-<>- cambiar logica de nombre de columnas, que se guarde el nombre de tabla origen cuando se repiten nombres -<>
-<>- cambiar nombres de las tablas cuando se asignan local y globalmente?                                    -<>
-<>- Aclarar que export es para variables globales unicamente                                                -<>
-<>- Cargar en browse operators                                                                              -<>
-<>- Agregar App a Exp
-<>- Que las variables puedan contener caracteres numericos                                                  -<>
+<>- unificar los infer y eval de Main con patternMatching en SympleTiped                                                 -<>
+<>- unificar las impresiones de error                                                                                    -<>
+<>- arreglar el tema de printType y printTerm                                                                            -<>
+<>- agregar renombramiento de columnas                                                                                   -<>
+<>- cambiar logica de nombre de columnas, que se guarde el nombre de tabla origen cuando se repiten nombres              -<>
+<>- cambiar nombres de las tablas cuando se asignan local y globalmente?                                                 -<>
+<>- Aclarar que export es para variables globales unicamente                                                             -<>
+<>- Agregar App a Exp             
+<>- Quitar los imports inservibles                                                                                       -<>
+<>- Variables locales en compilaciones                                                                                   -<>
+<>- Controlar bien el tema de pasaje de argumentos a los operadores (que no pasen un numero incorrecto ni repetidos)     -<>

@@ -1,2 +1,3 @@
-import csv hola.csv as Hola
+import csv imports/hola.csv as Hola
 import database [pw:"ar-sql-password"|db:"alp_final"|us:"ar-sql-user"]
+operator f = (t1|t2) => t1 * t2

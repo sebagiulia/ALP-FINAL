@@ -38,7 +38,7 @@ prettyTable rows =
 ------------
 pp :: Table -> Doc
 pp (rows, tname, cols) = let colsList =  (map snd cols) :: [String]
-                             rowsList = (map (map mySQLValueToString) rows) :: [[String]]
+                             rowsList = (map (map tableValueToString) rows) :: [[String]]
                          in prettyTable $ colsList : rowsList 
 
 

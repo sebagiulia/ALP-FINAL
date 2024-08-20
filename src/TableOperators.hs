@@ -2,22 +2,17 @@
 
 module TableOperators where
 
-import GHC.Int
-import Database.MySQL.Base
-import           System.IO.Streams (InputStream)
-import qualified System.IO.Streams as Streams
-import qualified Data.Text as T
 import Data.String
 import Data.List
-import Data.Semigroup (diff)
 
 type TableName = String
-type Row = [MySQLValue]
+data TableValue = Str String | Numb Int deriving (Show, Eq)
+type TableRow = [TableValue]
 type ColumnName = String
 type Column = (TableName,ColumnName)
-type Table = ([Row],TableName, [Column])
+type Table = ([TableRow],TableName, [Column])
 
-data Value = Col Column | Val MySQLValue
+data Value = Col Column | Val TableValue
                deriving(Show)
 
 data Condition = And Condition Condition
@@ -29,6 +24,11 @@ data Condition = And Condition Condition
                | Eq Value Value
                | Empty
                deriving(Show)
+
+--------------------------------------------------------------------------------------
+tableValueToString :: TableValue -> String
+tableValueToString (Str s) = s
+tableValueToString (Numb i) = show i
 
 ------------------------------- DIVISION ------- Hay que chequear tipos --------------
 removeEquals :: Table -> Table
@@ -103,11 +103,11 @@ ren (rs, _, cs) n = let ncs = renCols n cs
                           renCols n (c:cs') = (n, snd c):renCols n cs'
 
 ------------------------------- PRODUCTO CARTESIANO ----------- Hay que chequear tipos --------------
-bindRows :: Row -> [Row] -> [Row]
+bindRows :: TableRow -> [TableRow] -> [TableRow]
 bindRows r (r':rs) = ((r ++ r') : (bindRows r rs))
 bindRows _ [] = []
 
-combineRows :: [Row] -> [Row] -> [Row]
+combineRows :: [TableRow] -> [TableRow] -> [TableRow]
 combineRows [] _ = []
 combineRows (ar:ars) rs = let ars' = bindRows ar rs
                          in ars' ++ (combineRows ars rs)
@@ -118,7 +118,7 @@ pcart (arows, _, acols) (brows, _, bcols) = let cols = acols ++ bcols
                                             in (rs, "X", cols)
 
 ------------------------------- DIFERENCIA  ----------- Hay que chequear tipos --------------
-existRow :: [Column] -> Row -> [Column] -> [Row] -> Bool
+existRow :: [Column] -> TableRow -> [Column] -> [TableRow] -> Bool
 existRow acols a bcols brs = let ar' = zip acols a
                                  brs' = map (zip bcols) brs
                              in searchIn ar' brs'
@@ -130,7 +130,7 @@ existRow acols a bcols brs = let ar' = zip acols a
                                                                   Just av -> av == snd a' && compareRows as' brow
 
 
-removeRows :: [Column] -> [Row] -> [Column] -> [Row] -> [Row]
+removeRows :: [Column] -> [TableRow] -> [Column] -> [TableRow] -> [TableRow]
 removeRows acols [] bcols b = []
 removeRows acols (a:ars) bcols brs = if existRow acols a bcols brs
                                      then removeRows acols ars bcols brs
@@ -142,11 +142,11 @@ difftables (ars, _, acols) (brs, _, bcols) = let rs = removeRows acols ars bcols
                                          in (rs , "difftables", acols)
 
 ------------------------------- UNION  ----------- Hay que chequear tipos --------------
-compareRow :: Row -> Row -> Bool
+compareRow :: TableRow -> TableRow -> Bool
 compareRow (v:vs) (v':vs') = (extractVal v) == (extractVal v') && compareRow vs vs'
 compareRow _ _ = True
 
-removeRow :: Row -> [Row] -> [Row]
+removeRow :: TableRow -> [TableRow] -> [TableRow]
 removeRow _ [] = []
 removeRow r (r':rs) = if compareRow r r' then removeRow r rs
                                           else (r': removeRow r rs)
@@ -162,25 +162,24 @@ uni (arows, _, acols) (brows, _, _) = removeEqRows (arows ++ brows, "uni", acols
 
 ------------------------------- SELECCION  ----------- Hay que chequear tipos --------------
 
-extractVal :: MySQLValue -> Either Int32 T.Text
-extractVal (MySQLInt32 i) = Left i
-extractVal (MySQLText t) = Right t
-extractVal _ = undefined
+extractVal :: TableValue -> Either Int String
+extractVal (Numb i) = Left i
+extractVal (Str t) = Right t
 
-getVal :: Value -> Row -> [Column] -> Either Bool MySQLValue
+getVal :: Value -> TableRow -> [Column] -> Either Bool TableValue
 getVal (Val s) _ _ = Right s
 getVal (Col var) (r:rs) (c:cs) = if snd var == snd c && ( fst var == fst c || fst c == "") then Right r
                                  else getVal (Col var) rs cs
 getVal _ [] _ = Left False
 getVal _ _ [] = Left False
 
-getNumber :: Either Int32 T.Text -> Either Bool Int32
+getNumber :: Either Int String -> Either Bool Int
 getNumber (Left i) = Right i
 getNumber _ = Left False
 
 
 -- cond: = > < val or variable
-condition :: Condition -> Row -> [Column] -> Bool
+condition :: Condition -> TableRow -> [Column] -> Bool
 condition Empty _ _ = True
 condition (And c1 c2) r cs = (condition c1 r cs) && (condition c2 r cs)
 condition (Or c1 c2) r cs = (condition c1 r cs) || (condition c2 r cs)
@@ -234,7 +233,7 @@ sel (r:rs, name, cols) cond = let (rs', _, _) = sel (rs, name, cols) cond
 
 ------------------------------- PROYECCION ---------------------------------------------
 -- Devuelve los elementos de la fila correspondiente a las columnas
-cutCol :: (Row, [Column]) -> [Column] -> Row
+cutCol :: (TableRow, [Column]) -> [Column] -> TableRow
 cutCol (v:vs,c:cols) (cc:ccols) = if  snd c == snd cc &&
                                           (fst c == fst cc ||
                                            fst cc == "") then v: cutCol (vs, cols) ccols
@@ -242,7 +241,7 @@ cutCol (v:vs,c:cols) (cc:ccols) = if  snd c == snd cc &&
 cutCol _ _ = []
 
 -- Devuelve ls filas cortadas a partir de las columnas [cols]
-cutCols :: ([Row], [Column]) -> [Column] -> [Row]
+cutCols :: ([TableRow], [Column]) -> [Column] -> [TableRow]
 cutCols ([], _) _ = []
 cutCols (r:rows, tcols) cols = let r' = cutCol (r, tcols) cols
                                    rows' = cutCols (rows, tcols) cols
@@ -263,55 +262,3 @@ proy cols (trows, _, tcols) = let sortedCols = sortCols cols tcols
                                   trows' = cutCols (trows, tcols) sortedCols
                               in (trows', "proy", sortedCols)
 ---------------------------------------------------------
-
-extractName :: MySQLValue -> IO String
-extractName (MySQLText s) = return (T.unpack s)
-extractName (MySQLInt32 i) = return (show i)
-extractName n = return (show n) -- No deberia entrar
-
-printLine :: Row -> IO [String]
-printLine [] = return []
-printLine (l:ls) = do v <- extractName l
-                      vs <- printLine ls
-                      return (v:vs)
-
-printLines :: [Row] -> IO ()
-printLines [] = putStrLn ""
-printLines (l:ls) = do line <- printLine l
-                       print line
-                       printLines ls
-
-printTables :: [Table] -> IO ()
-printTables [] = putStrLn ""
-printTables ((t, n, cs):ts) = do putStrLn ("Tabla: " ++ n)
-                                 print cs
-                                 printLines t
-                                 printTables ts
-
-
-traduce :: InputStream a -> IO [a]
-traduce = Streams.toList
-
-mySQLValueToString :: MySQLValue -> String
-mySQLValueToString (MySQLInt32  n) = show n
-mySQLValueToString (MySQLText  t) = (T.unpack t)
-mySQLValueToString n = show n -- No deberia entrar
-
-
-getColumns :: [ColumnDef] -> TableName -> [Column]
-getColumns c  n = [show2 (columnName x) | x <- c ]
-                where show2 w = (n , init (tail (show w)))
-
-getTables :: MySQLConn -> [[MySQLValue]] -> IO [(Table, [ColumnDef])] -- > [(table, tname, cnames)]
-getTables _ [] = return []
-getTables conn (l:ls) = do tableName <- extractName (head l)
-                           (cdef, is) <- query_ conn (fromString ("select * from " ++ tableName))
-                           table <- traduce is
-                           tables <- getTables conn ls
-                           return (((table, tableName, getColumns cdef tableName), cdef):tables)
-
-getTableByName :: TableName -> [Table] -> Table
-getTableByName _ [] = ([], "undefined",[]) -- Undefined
-getTableByName n ((a, tname, b): ts) | n == tname = (a, tname, b)
-                                     | otherwise = getTableByName n ts
-

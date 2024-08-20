@@ -90,7 +90,8 @@ data Stmt i = Def String i           --  Declarar un nuevo identificador x, def 
             | ImportDB ConnWords      --  Conectarse a base de datos
             | ImportCSV String String
             | ExportCSV String String
-            | Drop String
+            | DropTable String
+            | DropOp String
             | Operator String OperatorArgs i
             | App String OperatorArgs
   deriving (Show)
@@ -102,6 +103,7 @@ instance Functor Stmt where
   fmap f (ImportCSV fil v)  = ImportCSV fil v
   fmap f (ImportDB w)  = ImportDB w
   fmap f (ExportCSV v s)  = ExportCSV v s
-  fmap f (Drop v) = Drop v
+  fmap f (DropTable v) = DropTable v
+  fmap f (DropOp v) = DropOp v
   fmap f (Operator v a i)  = Operator v a (f i)
   fmap f (App v a )  = App v a

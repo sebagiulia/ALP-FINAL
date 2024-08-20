@@ -21,6 +21,9 @@ library
       PrettyPrinter
       Simplytyped
       Parse
+      Csv
+      Error
+      Mysql
   other-modules:
       Paths_AR_SQL
   hs-source-dirs:

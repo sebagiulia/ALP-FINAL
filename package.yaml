@@ -49,6 +49,9 @@ library:
   - PrettyPrinter
   - Simplytyped
   - Parse 
+  - Csv
+  - Error
+  - Mysql
 
 executables:
   AR-SQL:

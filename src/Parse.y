@@ -41,7 +41,7 @@ import Data.Char
     IMPORT   { TImport }
     EXPORT   { TExport }
     DATABASE { TDatabase }
-    DEF      { TDef }
+    TABLE      { TTable }
     STRING   { TString $$ }
     VAR      { TVar $$ }
     NUM      { TNum $$ }
@@ -73,13 +73,16 @@ Def     :  Defexp                                { $1 }
         | IMPORT CSV VAR AS VAR                  { ImportCSV $3 $5 }
         | IMPORT DATABASE '[' ConnWords ']'      { ImportDB $4 }
         | EXPORT CSV VAR AS VAR                  { ExportCSV $3 $5 }
-        | DROP VAR                               { Drop $2 }
+        | Drop                                   { $1 }
         | Exp	                                 { Eval $1 }
         | OPERATOR VAR '=' '(' Args ')' '=>' Exp { Operator $2 $5 $8 }
         | App                                    { $1 }
-Defexp  :  DEF VAR '=' Exp                       { Def $2 $4 }
+Defexp  :  TABLE VAR '=' Exp                       { Def $2 $4 }
 Assign : VAR '->' Exp                            { Assign $1 $3 }
              
+
+Drop : DROP TABLE VAR    { DropTable $3 }
+     | DROP OPERATOR VAR { DropOp $3 }
 
 App : VAR '[' Args  ']' { App $1 $3 }  
 
@@ -186,7 +189,7 @@ data Token = TVar String
                | TRen
                | TDot
                | TQuote
-               | TDef
+               | TTable
                | TComma
                | TOpen
                | TOpenB
@@ -255,7 +258,7 @@ lexer cont s = case s of
                               ("import",rest) -> cont TImport rest
                               ("export",rest) -> cont TExport rest
                               ("database",rest) -> cont TDatabase rest
-                              ("def", rest) -> cont TDef rest
+                              ("table", rest) -> cont TTable rest
                               ("operator", rest) -> cont TOperator rest
                               ("S",rest)   -> cont TSelect rest
                               ("P", rest)   -> cont TProy rest
@@ -277,7 +280,7 @@ lexer cont s = case s of
                                 (str, ('"':rest)) -> cont (TString str) rest
                                 (str, rest) -> cont (TString str) rest 
                                 where isNotQuote c = c /= '"' 
-                          isAlpha' c = isAlpha c || c == '.' || c == '_' || c == '-'
+                          isAlpha' c = isAlpha c || c == '.' || c == '_' || c == '-' || c == '/' || isDigit c
 
                            
 stmts_parse s = parseStmts s 1

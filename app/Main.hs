@@ -120,10 +120,15 @@ handleCommand state@(S inter lfile nq gv lv ov) cmd = case cmd of
   Noop   -> return (Just state)
   Help   -> lift $ putStr (helpTxt commands) >> return (Just state)
   Browse -> lift $ do
-    putStrLn "Global variables:"
-    putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) gv)) ])
-    putStrLn "Local variables:"
-    putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) lv)) ])
+    when (length gv > 0) $ do {
+      putStrLn "Global variables:";
+      putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) gv)) ]) }
+    when (length lv > 0) $ do {
+      putStrLn "Local variables:";
+      putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) lv)) ]) }
+    when (length ov > 0) $ do {
+         putStrLn "Operators:";
+         putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) ov)) ]) }
     return (Just state)
   Compile c -> do
     state' <- case c of
@@ -248,7 +253,8 @@ handleStmt state stmt = lift $ do
     Def x e        -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
     Assign x e     -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
     Eval e         -> checkType it (conversion e) 0 --
-    Drop v         -> checkDrop v
+    DropTable v    -> checkDropTable v
+    DropOp v       -> checkDropOp v
     Operator v a e -> checkEvalOp v a e --
     App op a       -> checkEvalApp op a --
   if (not (inter st)) then return st { nq = (nq st) + 1 }
@@ -311,10 +317,14 @@ handleStmt state stmt = lift $ do
                           Left err -> show err
           putStrLn outtext
           return state
-  checkDrop v = do
-                  case evalDrop (gv state) v of
+  checkDropTable v = do
+                  case evalDropTable (gv state) v of
                       Left err -> putStrLn err >> return state
                       Right st -> putStrLn ("Variable " ++ v ++ " eliminada.") >> return (state { gv = st })
+  checkDropOp v = do
+                  case evalDropOp (ov state) v of
+                      Left err -> putStrLn err >> return state
+                      Right st -> putStrLn ("Operador " ++ v ++ " eliminado.") >> return (state { ov = st })
   checkEvalOp v a e = do
                   case evalOperator (ov state) v a e of
                     Left err -> putStrLn err >> return state
