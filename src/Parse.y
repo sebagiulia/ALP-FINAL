@@ -117,6 +117,14 @@ Words :: { TableCols }
       : Atom                           { [$1] }
       | Atom '|' Words               { $1 : $3 }
 
+
+--AtomCol :: { TableCol }
+--        : VAR           { LCol $1 }
+--        | '.' NUM       { LColInd $2 }
+--        | VAR ':'VAR    { LColRen $1 $3 }
+
+
+
 ExpCond :: { TableCond }
         : TermCond                { $1 }
         | ExpCond '&' ExpCond     { LAnd $1 $3 }

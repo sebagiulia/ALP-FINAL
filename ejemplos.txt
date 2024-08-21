@@ -3,7 +3,6 @@
 <>- agregar renombramiento de columnas                                                                                   -<>
 <>- cambiar logica de nombre de columnas, que se guarde el nombre de tabla origen cuando se repiten nombres              -<>
 <>- Aclarar que export es para variables globales unicamente                                                             -<>
-<>- Agregar App a Exp             
 <>- Quitar los imports inservibles                                                                                       -<>
 <>- Variables locales en compilaciones                                                                                   -<>
 <>- Achicar state para que sea mas lejible                                                                               -<>
