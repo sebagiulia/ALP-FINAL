@@ -76,15 +76,12 @@ Def     :  Defexp                                { $1 }
         | Drop                                   { $1 }
         | Exp	                                 { Eval $1 }
         | OPERATOR VAR '=' '(' Args ')' '=>' Exp { Operator $2 $5 $8 }
-        | App                                    { $1 }
-Defexp  :  TABLE VAR '=' Exp                       { Def $2 $4 }
+Defexp  :  TABLE VAR '=' Exp                       { Table $2 $4 }
 Assign : VAR '->' Exp                            { Assign $1 $3 }
              
 
 Drop : DROP TABLE VAR    { DropTable $3 }
      | DROP OPERATOR VAR { DropOp $3 }
-
-App : VAR '[' Args  ']' { App $1 $3 }  
 
 Exp     :: { TableTerm }
         : SEL '[' ExpCond ']' '(' Exp ')' { LSel $3 $6}
@@ -97,6 +94,7 @@ Exp     :: { TableTerm }
         | Exp 'U' Exp                     { LUni $1 $3 }
         | Exp 'I' Exp                     { LInt $1 $3 }
         | Exp '/' Exp                     { LDiv $1 $3 }
+        | VAR '[' Args  ']'               { LApp $1 $3 }
         | '(' Exp ')'                     { $2 }
 
 ConnWords :: { ConnWords }

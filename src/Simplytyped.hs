@@ -3,51 +3,45 @@
 
 
 module Simplytyped
-  ( conversion
-  ,    -- conversion a terminos localmente sin nombre
-    eval
-  ,          -- evaluador
-    infer
-           -- inferidor de tipos
-  ,getDBData,
+  (
+  conversion,
+  infer,
+  evalDef,
+  eval,
   evalImportCSV,
   evalImportDB,
   evalExportCSV,
   evalOperator,
   evalDropTable,
   evalDropOp,
-  evalApp,
+  getDBData,
   checkNameFileExport,
   checkNameFileImport,
   )
 where
 
-import Mysql
-import Csv
-import Error
-
-import Data.Csv (encode, decode, HasHeader(NoHeader))
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.Vector as V
-import Network.Socket (PortNumber)
-import Control.Exception (SomeException, IOException, catch, Exception (toException), try)
-import           Data.List
-import Data.Int (Int32)
-import           Data.Maybe
-import           Prelude                 hiding ( (>>=), tail )
-import           Text.PrettyPrint.HughesPJ      ( render )
+import           Mysql
+import           Csv
+import           Error
 import           PrettyPrinter
 import           Common
-import TableOperators
-import  qualified Data.Text as T
-import  Data.Text (Text, pack, unpack, strip)
-import Database.MySQL.Protocol.MySQLValue (MySQLValue(MySQLText, MySQLInt32U))
-import Database.MySQL.Base hiding (render)
-import Data.Char (isUpper)
-import Control.Monad.Cont
-import System.Directory (doesFileExist)
-import System.IO (writeFile)
+import           TableOperators
 
+import qualified Data.ByteString.Lazy as BL
+import           Data.Maybe (fromJust)
+import           Data.Text (pack, unpack, strip)
+import           Data.Char (isUpper)
+import           Data.List (nub)
+import           Prelude  hiding ( (>>=), tail )
+import           Text.PrettyPrint.HughesPJ ( render )
+import           Control.Exception (SomeException, IOException, catch, Exception (toException), try)
+import           Database.MySQL.Base (ConnectInfo)
+import           System.Directory (doesFileExist)
+import           System.IO (writeFile)
+
+
+emptytable :: Table
+emptytable = ([], "null", [])
 
 -- Separe between TableName and ColumnName
 -- Example: "Movies.name" -> C "Movies" "name" 
@@ -96,49 +90,50 @@ conversion' l (LDiv t1 t2) = Div (conversion' l t1) (conversion' l t2)
 conversion' l (LDiff t1 t2) = Diff (conversion' l t1) (conversion' l t2)
 conversion' l (LUni t1 t2) = Uni (conversion' l t1) (conversion' l t2)
 conversion' l (LInt t1 t2) = Int (conversion' l t1) (conversion' l t2)
+conversion' l (LApp op args) = App op args
 
-conversionOperator :: [TableName] -> TableTerm -> Term
-conversionOperator args t = conversion' (zip args [0..]) t
+evalDef :: TableName -> NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Table
+evalDef n g l o t = let tab = eval g l o t
+                    in ren tab n 
 
+-- evaluador de términos
+eval :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Table
+eval = eval' []
 
-evalApp :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> String -> OperatorArgs -> Either String Table
-evalApp s l ops v args = case lookup v ops of
-                           Nothing -> Left "Operador invalido."
-                           Just term -> case foldr existargs (Right []) args  of
-                                          Right argtables -> case infer' argtables s l term of
-                                                              Right typ -> Right (eval' argtables s l term)
-                                                              Left err -> Left err
-                                          Left err -> Left err
+eval' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType ->  [(String, Term)] -> Term -> Table
+eval' _ e l o (GlobalTableVar v) = fst $ fromJust $ lookup v e
+eval' _ e l o (LocalTableVar i) =  fst $ fromJust $ lookup i l
+eval' a e l o (Sel cond t) = sel (eval' a e l o t) cond
+eval' a e l o (Proy cs t) = proy cs (eval' a e l o t)
+eval' a e l o (Ren n t) = ren (eval' a e l o t) n
+eval' a e l o (PCart t1 t2) = pcart (eval' a e l o t1) (eval' a e l o t2)
+eval' a e l o (PNat t1 t2) = pnat (eval' a e l o t1) (eval' a e l o t2)
+eval' a e l o (Div t1 t2) = divtables (eval' a e l o t1) (eval' a e l o t2)
+eval' a e l o (Diff t1 t2) = difftables (eval' a e l o t1) (eval' a e l o t2)
+eval' a e l o (Uni t1 t2) = uni (eval' a e l o t1) (eval' a e l o t2)
+eval' a e l o (Int t1 t2) = int (eval' a e l o t1) (eval' a e l o t2)
+eval' a _ _ _ (Bound n) = fst (a !! n)
+eval' a g l o (App op args) = case lookup op o of
+                                Nothing -> emptytable
+                                Just term -> case foldr existargs (Right []) args  of
+                                          Right argtables -> eval' argtables g l o term
+                                          Left err -> emptytable
                             where existargs _ (Left err) = Left err
                                   existargs a (Right ags') = if isUpper (head a)
-                                    then case lookup a s of
+                                    then case lookup a g of
                                            Nothing -> Left $ "No se encuentra variable global " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
                                     else case lookup a l of
                                            Nothing -> Left $ "No se encuentra variable local " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
+ 
+conversionOperator :: [TableName] -> TableTerm -> Term
+conversionOperator args t = conversion' (zip args [0..]) t
 
 evalOperator :: [(String, Term)] -> String -> OperatorArgs -> TableTerm -> Either String [(String, Term)]
 evalOperator ops v args t = case lookup v ops of
                               Just _ -> Left "Opeador existente."
                               Nothing -> Right $ (v,conversionOperator args t):ops
--- evaluador de términos
-eval :: NameEnv Table TableType -> NameEnv Table TableType -> Term -> Table
-eval = eval' []
-
-eval' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType -> Term -> Table
-eval' _ e l (GlobalTableVar v) = fst $ fromJust $ lookup v e
-eval' _ e l (LocalTableVar i) =  fst $ fromJust $ lookup i l
-eval' a e l (Sel cond t) = sel (eval' a e l t) cond
-eval' a e l (Proy cs t) = proy cs (eval' a e l t)
-eval' a e l (Ren n t) = ren (eval' a e l t) n
-eval' a e l (PCart t1 t2) = pcart (eval' a e l t1) (eval' a e l t2)
-eval' a e l (PNat t1 t2) = pnat (eval' a e l t1) (eval' a e l t2)
-eval' a e l (Div t1 t2) = divtables (eval' a e l t1) (eval' a e l t2)
-eval' a e l (Diff t1 t2) = difftables (eval' a e l t1) (eval' a e l t2)
-eval' a e l (Uni t1 t2) = uni (eval' a e l t1) (eval' a e l t2)
-eval' a e l (Int t1 t2) = int (eval' a e l t1) (eval' a e l t2)
-eval' a _ _ (Bound n) = fst (a !! n)
 
 
 
@@ -193,7 +188,7 @@ checkNameFileExport s v f = case lookup v s of
                                         else Right $ "exports/" ++ f
 
 -- type checker
-infer :: NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType
+infer :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Either String TableType
 infer = infer' []
 -- definiciones auxiliares
 ret :: TableType -> Either String TableType
@@ -238,65 +233,81 @@ notfunError t1 = err $ render (printType t1) ++ " no puede ser aplicado."
 notfoundError :: TableName -> Either String TableType
 notfoundError n = err $ show n ++ " no está definida."
 
-infer' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType -> Term -> Either String TableType
-infer' _ _ l (LocalTableVar n) = case lookup n l of
+infer' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Either String TableType
+infer' _ _ l _ (LocalTableVar n) = case lookup n l of
                                    Just (_, t) -> ret t
                                    _           -> notfoundError n
-infer' _ e l (GlobalTableVar n) = case lookup n e of
+infer' _ e l _ (GlobalTableVar n) = case lookup n e of
                                   Just (_, t) -> ret t
                                   _           -> notfoundError n
-infer' c e l (Sel cond t) = infer' c e l t
-infer' c e l (Proy cs t) = case infer' c e l t of
+infer' c e l o (Sel cond t) = infer' c e l o t
+infer' c e l o (Proy cs t) = case infer' c e l o t of
                           Right t -> ret (proyInfer cs t)
                           err     -> err
-infer' c e l (Ren n t) = case infer' c e l t of
+infer' c e l o (Ren n t) = case infer' c e l o t of
                           Right t -> ret (n, snd t)
                           err -> err
-infer' c e l (PCart t1 t2) = case infer' c e l t1 of
+infer' c e l o (PCart t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e l t2 of
+                             Right (n1, t1cs) -> case infer' c e l o t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) ->  if n1 == n2
                                                                        then nameError n1
                                                                        else ret (n1 ++ "*"++ n2, t1cs ++ t2cs)
-infer' c e l (PNat t1 t2) = case infer' c e l (PCart t1 t2) of
+infer' c e l o (PNat t1 t2) = case infer' c e l o (PCart t1 t2) of
                             Left e -> Left e
-                            _ -> case infer' c e l t1 of
+                            _ -> case infer' c e l o t1 of
                                    Left e  -> err e
-                                   Right (n1, t1cs) -> case infer' c e l t2 of
+                                   Right (n1, t1cs) -> case infer' c e l o t2 of
                                                           Left e  -> err e
                                                           Right (n2, t2cs) -> case matchCols (n1, t1cs) (n2, t2cs) of
                                                                                   Right t -> ret t
                                                                                   err -> err
-infer' c e l (Uni t1 t2) = case infer' c e l t1 of
+infer' c e l o (Uni t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e l t2 of
+                             Right (n1, t1cs) -> case infer' c e l o t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareCols (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " U " ++ n2, t)
                                                                        err -> err
-infer' c e l (Int t1 t2) = case infer' c e l t1 of
+infer' c e l o (Int t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e l t2 of
+                             Right (n1, t1cs) -> case infer' c e l o t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareCols (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " I " ++ n2, t)
                                                                        err -> err
-infer' c e l (Diff t1 t2) = case infer' c e l t1 of
+infer' c e l o (Diff t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e l t2 of
+                             Right (n1, t1cs) -> case infer' c e l o t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareCols (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " - " ++ n2, t)
                                                                        err -> err
-infer' c e l (Div t1 t2) = case infer' c e l t1 of
+infer' c e l o (Div t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e l t2 of
+                             Right (n1, t1cs) -> case infer' c e l o t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareColsDiv (n1, t1cs) (n2, t2cs) of
                                                                        Right (_,t) -> ret (n1 ++ " / " ++ n2, t)
                                                                        err -> err
-infer' c _ _ (Bound i) = ret $ snd (c !! i)
+infer' c _ _ _ (Bound i) = if i < length c then ret $ snd (c !! i)
+                                           else Left "Argumentos invalidos."
+infer' c g l ops (App op args) = case lookup op ops of
+                           Nothing -> Left "Operador invalido."
+                           Just term -> case foldr existargs (Right []) args  of
+                                          Right argtables -> if length argtables /= length args 
+                                                             then Left "Argumentos invalidos."
+                                                             else infer' argtables g l ops term
+                                          Left err -> Left err
+                            where existargs _ (Left err) = Left err
+                                  existargs a (Right ags') = if isUpper (head a)
+                                    then case lookup a g of
+                                           Nothing -> Left $ "No se encuentra variable global " ++ a ++ "."
+                                           Just tt -> Right $ tt:ags'
+                                    else case lookup a l of
+                                           Nothing -> Left $ "No se encuentra variable local " ++ a ++ "."
+                                           Just tt -> Right $ tt:ags'
 
 proyInfer :: [Column] -> TableType -> TableType
 proyInfer [] (n,_) = (n, [])

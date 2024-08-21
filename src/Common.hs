@@ -66,6 +66,7 @@ data TableTerm = LSel TableCond TableTerm
                | LUni TableTerm TableTerm            
                | LInt TableTerm TableTerm
                | LTableVar TableName
+               | LApp String OperatorArgs
           deriving (Show)
 
 
@@ -81,10 +82,11 @@ data Term = Sel Condition Term
           | GlobalTableVar TableName
           | LocalTableVar TableName
           | Bound Int
+          | App String OperatorArgs
           deriving (Show)
 
 -- Comandos interactivos o de archivos
-data Stmt i = Def String i           --  Declarar un nuevo identificador x, def x = e
+data Stmt i = Table String i           --  Declarar un nuevo identificador x, def x = e
             | Eval i                 --  Evaluar el término
             | Assign String i        --  Declarar un identificador temporal x, x -> t
             | ImportDB ConnWords      --  Conectarse a base de datos
@@ -93,11 +95,10 @@ data Stmt i = Def String i           --  Declarar un nuevo identificador x, def 
             | DropTable String
             | DropOp String
             | Operator String OperatorArgs i
-            | App String OperatorArgs
   deriving (Show)
 
 instance Functor Stmt where
-  fmap f (Def s i) = Def s (f i)
+  fmap f (Table s i) = Table s (f i)
   fmap f (Assign s i) = Assign s (f i)
   fmap f (Eval i)  = Eval (f i)
   fmap f (ImportCSV fil v)  = ImportCSV fil v
@@ -106,4 +107,3 @@ instance Functor Stmt where
   fmap f (DropTable v) = DropTable v
   fmap f (DropOp v) = DropOp v
   fmap f (Operator v a i)  = Operator v a (f i)
-  fmap f (App v a )  = App v a

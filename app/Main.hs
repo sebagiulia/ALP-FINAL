@@ -145,7 +145,7 @@ handleCommand state@(S inter lfile nq gv lv ov) cmd = case cmd of
     x' <- parseIO "<interactive>" term_parse s
     t  <- case x' of
       Nothing -> return $ Left "Error en el parsing."
-      Just x  -> return $ infer gv lv $ conversion $ x
+      Just x  -> return $ infer gv lv ov $ conversion $ x
     case t of
       Left  err -> lift (putStrLn ("Error de tipos: " ++ err)) >> return ()
       Right t'  -> lift $ putStrLn $ render $ printType t'
@@ -225,7 +225,7 @@ printPhrase x = do
 printStmt :: Stmt (TableTerm, Term) -> InputT IO ()
 printStmt stmt = lift $ do
   let outtext = case stmt of
-        Def x (_, e) -> "def " ++ x ++ " = "-- ++ render (printTerm e)
+        Table x (_, e) -> "def " ++ x ++ " = "-- ++ render (printTerm e)
         Assign x (_, e) -> x ++ " -> " ++ render (printTerm e)
         Eval (d, e) ->
           "TableTerm AST:\n"
@@ -250,28 +250,36 @@ handleStmt state stmt = lift $ do
     ImportDB d     -> checkImportDB d 
     ImportCSV f v  -> checkImportCSV f v
     ExportCSV v f  -> checkExportCSV v f
-    Def x e        -> if isUpper (head x) then checkType x (conversion e) 0 else putStrLn "Nombre de variable invalido" >> return state
+    Table x e      -> checkDefTable x (conversion e)
     Assign x e     -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
     Eval e         -> checkType it (conversion e) 0 --
     DropTable v    -> checkDropTable v
     DropOp v       -> checkDropOp v
     Operator v a e -> checkEvalOp v a e --
-    App op a       -> checkEvalApp op a --
   if (not (inter st)) then return st { nq = (nq st) + 1 }
                          else return st
  where
+  checkDefTable i t = do
+    if not (isUpper (head i))
+    then putStrLn "Error: Nombre de variable invalido, el primer caracter debe ser en mayusculas" >> return state
+    else case infer (gv state) (lv state) (ov state) t of
+          Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
+          Right ty  -> do
+            let v = evalDef i (gv state) (lv state) (ov state) t
+            if (elem i (map fst (gv state)))
+            then do putStrLn ("Variable " ++ i ++ " actualizada.")
+                    return (state { gv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (gv state), lv = [] })
+            else do putStrLn i   
+                    return (state { gv = (i,(v,ty)) : gv state, lv = [] })
   checkType i t a = do
-    case infer (gv state) (lv state) t of
+    case infer (gv state) (lv state) (ov state) t of
       Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
       Right ty  -> checkEval i t ty a
   checkEval i t ty a = do
-    let v = eval (gv state) (lv state) t
+    let v = eval (gv state) (lv state) (ov state) t
     _ <- when (a /= 1) $ do
-      let outtext =
-            if i == it then render (printTable v) else render (text i)
-      if (i /= it && elem i (map fst (gv state)))
-              then putStrLn ("Variable " ++ i ++ " actualizada.")
-              else putStrLn outtext 
+      let outtext = render (printTable v)
+      putStrLn outtext 
     if a == 1  
     then if (elem i (map fst (lv state)))
          then return (state { lv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (lv state)})
@@ -329,10 +337,6 @@ handleStmt state stmt = lift $ do
                   case evalOperator (ov state) v a e of
                     Left err -> putStrLn err >> return state
                     Right st -> putStrLn ("Operador " ++ v ++ " cargado.") >> return (state { ov = st})
-  checkEvalApp op a = do
-                  case evalApp (gv state) (lv state) (ov state) op a of
-                    Left err -> putStrLn err >> return state
-                    Right table -> putStrLn (render (printTable table)) >> return state 
 
 prelude :: String
 prelude = "Ejemplos/Prelude.arsql"
