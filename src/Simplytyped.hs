@@ -31,13 +31,14 @@ import qualified Data.ByteString.Lazy as BL
 import           Data.Maybe (fromJust)
 import           Data.Text (pack, unpack, strip)
 import           Data.Char (isUpper)
-import           Data.List (nub)
+import           Data.List (nub, (\\), sortBy, groupBy, find, isSubsequenceOf)
 import           Prelude  hiding ( (>>=), tail )
 import           Text.PrettyPrint.HughesPJ ( render )
 import           Control.Exception (SomeException, IOException, catch, Exception (toException), try)
 import           Database.MySQL.Base (ConnectInfo)
 import           System.Directory (doesFileExist)
 import           System.IO (writeFile)
+import Data.Function
 
 
 emptytable :: Table
@@ -48,8 +49,8 @@ emptytable = ([], "null", [])
 -- Example: "name" -> C "" "name" 
 separeAtDot :: String -> Column
 separeAtDot c = let (beforeDot, rest) = span (/= '.') c
-                in if null rest then ("", beforeDot)
-                                else (beforeDot, drop 1 rest)
+                in if null rest then ([], beforeDot)
+                                else ([beforeDot], drop 1 rest)
 columns :: TableCols -> [Column]
 columns [] = []
 columns ((LVar v):cs) = let cs' = columns cs
@@ -94,7 +95,7 @@ conversion' l (LApp op args) = App op args
 
 evalDef :: TableName -> NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Table
 evalDef n g l o t = let tab = eval g l o t
-                    in ren tab n 
+                    in ren tab n
 
 -- evaluador de términos
 eval :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Table
@@ -126,7 +127,7 @@ eval' a g l o (App op args) = case lookup op o of
                                     else case lookup a l of
                                            Nothing -> Left $ "No se encuentra variable local " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
- 
+
 conversionOperator :: [TableName] -> TableTerm -> Term
 conversionOperator args t = conversion' (zip args [0..]) t
 
@@ -173,19 +174,22 @@ evalDropOp s v = case lookup v s of
 
 checkNameFileImport :: NameEnv Table TableType -> String -> String -> Either String String
 checkNameFileImport s file name = let (nf, ext) = separeAtDot file
-                        in if nf == "" || ext /= "csv" then Left "No se trata de un archivo csv.\n"
+                        in if null nf || ext /= "csv" then Left "No se trata de un archivo csv."
                            else if not (isUpper (head name)) then Left "Nombre de variable invalido."
                            else case lookup name s of
                                   Nothing -> Right $ file
-                                  _       -> Left $ "Variable existente: " ++ name ++ ".\n"
+                                  _       -> Left $ "Variable existente: " ++ name ++ "."
 
 checkNameFileExport :: NameEnv Table TableType -> String -> String -> Either String String
-checkNameFileExport s v f = case lookup v s of
-                     Nothing -> Left "Variable inexistente."
-                     _       -> let (ext, n) = break (=='.') (reverse f)
-                                in if ext /= "vsc" then Left "Falta extension csv en archivo."
-                                   else if n == "" then Left "Nombre de archivo invalido."
-                                        else Right $ "exports/" ++ f
+checkNameFileExport s v f = if not (isUpper (head v))
+                            then Left "Solo las variables globales son exportables."
+                            else
+                              case lookup v s of
+                               Nothing -> Left "Variable inexistente."
+                               _       -> let (ext, n) = break (=='.') (reverse f)
+                                          in if ext /= "vsc" then Left "Falta extension csv en archivo."
+                                             else if n == "" then Left "Nombre de archivo invalido."
+                                                  else Right $ "exports/" ++ f
 
 -- type checker
 infer :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Either String TableType
@@ -240,20 +244,31 @@ infer' _ _ l _ (LocalTableVar n) = case lookup n l of
 infer' _ e l _ (GlobalTableVar n) = case lookup n e of
                                   Just (_, t) -> ret t
                                   _           -> notfoundError n
-infer' c e l o (Sel cond t) = infer' c e l o t
+infer' c e l o (Sel cond t) = case infer' c e l o t of
+                               Right typ -> checkCond cond typ
+                               err -> err
 infer' c e l o (Proy cs t) = case infer' c e l o t of
-                          Right t -> ret (proyInfer cs t)
+                          Right t -> case proyInfer cs t of
+                                      Right ty -> ret ty
+                                      err -> err
                           err     -> err
 infer' c e l o (Ren n t) = case infer' c e l o t of
-                          Right t -> ret (n, snd t)
-                          err -> err
+                            Right ty -> if maximum (map (\((ot,_), _) -> length ot) (snd ty)) > 1
+                                        then Left "Hay columnas con el mismo nombre."
+                                        else ret (n, map (\((l, cn), t) -> 
+                                                          if length l == 1 
+                                                          then (([n], cn), t)
+                                                          else ((l, cn), t)) (snd ty))
+                            err -> err
 infer' c e l o (PCart t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
                              Right (n1, t1cs) -> case infer' c e l o t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) ->  if n1 == n2
                                                                        then nameError n1
-                                                                       else ret (n1 ++ "*"++ n2, t1cs ++ t2cs)
+                                                                       else case concatColsTyp t1cs t2cs of
+                                                                              Right ts -> ret (n1 ++ "*" ++ n2, ts)
+                                                                              Left err -> coltypeError err err
 infer' c e l o (PNat t1 t2) = case infer' c e l o (PCart t1 t2) of
                             Left e -> Left e
                             _ -> case infer' c e l o t1 of
@@ -262,7 +277,7 @@ infer' c e l o (PNat t1 t2) = case infer' c e l o (PCart t1 t2) of
                                                           Left e  -> err e
                                                           Right (n2, t2cs) -> case matchCols (n1, t1cs) (n2, t2cs) of
                                                                                   Right t -> ret t
-                                                                                  err -> err
+                                                                                  Left err -> coltypeError err err
 infer' c e l o (Uni t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
                              Right (n1, t1cs) -> case infer' c e l o t2 of
@@ -296,7 +311,7 @@ infer' c _ _ _ (Bound i) = if i < length c then ret $ snd (c !! i)
 infer' c g l ops (App op args) = case lookup op ops of
                            Nothing -> Left "Operador invalido."
                            Just term -> case foldr existargs (Right []) args  of
-                                          Right argtables -> if length argtables /= length args 
+                                          Right argtables -> if length argtables /= length args
                                                              then Left "Argumentos invalidos."
                                                              else infer' argtables g l ops term
                                           Left err -> Left err
@@ -309,58 +324,110 @@ infer' c g l ops (App op args) = case lookup op ops of
                                            Nothing -> Left $ "No se encuentra variable local " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
 
-proyInfer :: [Column] -> TableType -> TableType
-proyInfer [] (n,_) = (n, [])
-proyInfer _ (n, []) = (n, [])
-proyInfer (c:cs) (n, ts) = case lookup (snd c) (map (\((x,y),z) -> (y,z)) ts) of
+proyInfer :: [Column] -> TableType -> Either String TableType
+proyInfer [] (n,_) = Right (n, [])
+proyInfer _ (n, []) = Right (n, [])
+proyInfer (c:cs) (n, ts) = case lookup (snd c) (map (\((x,y),z) -> (y,(x,z))) ts) of
                         Nothing -> proyInfer cs (n, ts)
-                        Just t -> let (_, ts') = proyInfer cs (n, ts)
-                                  in (n, (c,t):ts')
+                        Just (ot,t) -> case proyInfer cs (n, ts) of
+                                        Right (_, ts') -> if null (fst c)
+                                                          then if length ot > 1
+                                                               then Left "Columna ambigua, nombres repetidos."
+                                                               else Right (n, ((ot, snd c),t):ts')
+                                                          else if isSubsequenceOf (fst c) ot
+                                                               then Right (n, (c,t):ts')
+                                                               else Left "Alguna/s columnas inexistentes."
+                                        Left err -> Left err
 
-matchCols :: TableType -> TableType -> Either String TableType
+
+concatColsTyp :: [(Column, Type)] -> [(Column, Type)] -> Either (Column, Type) [(Column, Type)] -- -> [(([tab1,tab2,...], col), type)] = tab1.col, tab2.col, ...  
+concatColsTyp xs ys = foldr combineGroup (Right []) grouped
+  where -- [[((ts, c),ty1), (ts1, c),ty1),...],[]]
+    combined = xs ++ ys
+    sorted = sortBy (compare `on` (snd . fst)) combined
+    grouped = groupBy ((==) `on` (snd . fst)) sorted -- Agrupamos por nombre de columna
+    -- Para columnas con el mismo nombre, agrupamos segun tabla de origen: ([t1,t2], cname)
+    combineGroup grp (Right cs) = if length (nub (map snd grp)) > 1
+                                  then Left (head grp)
+                                  else Right $ ((concatMap (fst. fst) grp, snd (fst (head grp))), snd (head grp)):cs
+    combineGroup grp (Left err) = Left err
+
+matchCols :: TableType -> TableType -> Either (Column, Type) TableType
 matchCols (n1, []) (n2, ts) = Right (n1 ++ "|x|" ++ n2, ts)
-matchCols (n1, t:ts) (n2, ts') = case filterCols t ts' of
-                                      Right ts'' -> case matchCols (n1, ts) (n2, ts'') of
-                                                    Right (_, ts''') -> Right (n1 ++ "|x|" ++ n2, t:ts''')
-                                                    err -> err
-                                      Left n     -> coltypeError n n
-                                where filterCols _ [] = Right []
-                                      filterCols tcname (tc:tcs) = if fst tcname == fst tc
-                                                                   then if snd tcname == snd tc
-                                                                        then filterCols tcname tcs
-                                                                        else Left tcname
-                                                                   else case filterCols tcname tcs of
-                                                                          Right tcs' -> Right (tc:tcs')
-                                                                          err -> err
+matchCols (n1, t1) (n2, t2) = case concatColsTyp t1 t2 of
+                                Right ts -> Right (n1 ++ "|x|" ++ n2, map f ts)
+                                Left err -> Left err
+                                where
+                                f ((tables, col), typ) = if length tables > 1
+                                                         then (([head tables], col), typ)
+                                                         else ((tables, col), typ)
 
 compareCols :: TableType -> TableType -> Either String TableType
 compareCols (n1, []) _ = Right (n1, [])
 compareCols _ (n2, []) = Right (n2, [])
 compareCols (n1, ts1) (n2, ts2) = if length ts1 /= length ts2
                                   then tablesizeError n1 n2
-                                  else case compareCols' (n1, ts1) (n1, ts2) of
-                                          Right _ -> Right (n1, ts1)
-                                          err -> err
-                                where compareCols' (n1, []) (n2, _) = Right (n1,[])
-                                      compareCols' (n1, (t:ts)) (n2, (t':ts')) = if fst t == fst t'
-                                                                                 then if snd t == snd t'
-                                                                                      then compareCols' (n1, ts) (n2, ts')
-                                                                                      else coltypeError t t'
-                                                                                 else colnameError n1 n2
+                                  else case foldr compare' (Right (n1, ts1)) (zip ts1 ts2) of
+                                        Left err -> Left err
+                                        Right _  -> Right (n1, ts1)
+                                  where compare' _ (Left err) = Left err
+                                        compare' (a@((ts, c1),ty1), b@((ts', c2),ty2)) _
+                                          | c1 /= c2 = colnameError c1 c2
+                                          | ty1 /= ty2 = coltypeError a b
+                                          | length ts == 1 && length ts' == 1 = Right (n1, ts1)
+                                          | ts \\ ts' /= [] = colnameError c1 c2 
+                                          | otherwise = Right (n1, ts1)
 
+checkCond :: Condition -> TableType -> Either String TableType
+checkCond Empty ty = Right ty
+checkCond (And c1 c2) ty = case checkCond c1 ty of
+                             Right _ -> checkCond c2 ty
+                             err -> err
+checkCond (Or c1 c2) ty = case checkCond c1 ty of
+                             Right _ -> checkCond c2 ty
+                             err -> err
+checkCond (Gr v1 v2) ty = case checkVal v1 ty of
+                          Right _ -> checkVal v2 ty 
+                          err -> err 
+checkCond (Lr v1 v2) ty = case checkVal v1 ty of
+                          Right _ -> checkVal v2 ty 
+                          err -> err 
+checkCond (Greq v1 v2) ty = case checkVal v1 ty of
+                          Right _ -> checkVal v2 ty 
+                          err -> err 
+checkCond (Lreq v1 v2) ty = case checkVal v1 ty of
+                          Right _ -> checkVal v2 ty 
+                          err -> err 
+checkCond (Eq v1 v2) ty = case checkVal v1 ty of
+                          Right _ -> checkVal v2 ty 
+                          err -> err 
+
+checkVal :: Value -> TableType -> Either String TableType
+checkVal (Col c) typ = case find (\a -> snd c == snd a) (map fst (snd typ)) of
+                              Nothing -> Left $ "No se encuentra la columna " ++ snd c
+                              Just (ts,_) -> if null (fst c)  
+                                             then if length ts == 1 then Right typ
+                                                  else Left "Columna ambigua, nombres repetidos."
+                                             else if isSubsequenceOf (fst c) ts 
+                                                  then Right typ
+                                                  else Left "Columnas invalidas"
+checkVal _ typ = Right typ
+   
+
+
+-- [c1, c2, c3, c4] / [c2,c3] -> [c1,c4]
 compareColsDiv :: TableType -> TableType -> Either String TableType
 compareColsDiv (n1, ts) (n2, []) = Right (n1 ++ " / " ++ n2, ts)
 compareColsDiv (n1, []) (n2, ts') = tablesizeError n1 n2
-compareColsDiv (n1, ts') (n2, (t:ts)) = case filterCols t ts' of
-                                          Right ts'' -> case compareColsDiv (n1, ts'') (n2, ts) of
-                                                          Right (_, ts''') -> Right (n1 ++ " / " ++ n2, ts''')
-                                                          err              -> err
-                                          Left n     -> coltypeError n n
-                                where filterCols _ [] = Right []
-                                      filterCols tcname (tc:tcs) = if (fst tcname) == (fst tc)
-                                                                   then if snd tcname == snd tc
-                                                                        then filterCols tcname tcs
-                                                                        else Left tcname
-                                                                   else case filterCols tcname tcs of
-                                                                          Right tcs' -> Right (tc:tcs')
-                                                                          err -> err
+compareColsDiv (n1, ts) (n2, ts') = case foldr (filtercols ts') (Right []) ts of
+                                        Right l -> Right (n1 ++ " / " ++ n2, l)
+                                        Left err -> coltypeError err err
+                                 where filtercols _ _ (Left err) =  Left err
+                                       filtercols den ((t, c), typ) (Right ls) =
+                                             case find (\((_,c'),_) -> c == c') den of
+                                             Just ((t', _), typ') -> if typ /= typ'
+                                                                     then Left ((t, c), typ)
+                                                                     else case t \\ t' of
+                                                                            [] -> Right ls
+                                                                            ls' -> Right $ ((ls', c), typ):ls
+                                             Nothing              -> Right ls

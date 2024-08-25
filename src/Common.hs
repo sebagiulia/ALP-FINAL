@@ -17,9 +17,6 @@ data ConnectionType = T {
 
 type Context = [TableType]
 
-
-
-
 -- Entornos
 type NameEnv table ty = [(TableName, (table, ty))]
 
@@ -33,7 +30,6 @@ data ConnWord = LHost TableAtom
 type ConnWords = [ConnWord]
 
 type OperatorArgs = [String]
-
 
 -- TableColumns
 type TableCols = [TableAtom]

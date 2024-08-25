@@ -76,6 +76,7 @@ Def     :  Defexp                                { $1 }
         | Drop                                   { $1 }
         | Exp	                                 { Eval $1 }
         | OPERATOR VAR '=' '(' Args ')' '=>' Exp { Operator $2 $5 $8 }
+        | '(' Def ')'                            { $2 }
 Defexp  :  TABLE VAR '=' Exp                       { Table $2 $4 }
 Assign : VAR '->' Exp                            { Assign $1 $3 }
              
@@ -116,14 +117,6 @@ Args :: { OperatorArgs }
 Words :: { TableCols }
       : Atom                           { [$1] }
       | Atom '|' Words               { $1 : $3 }
-
-
---AtomCol :: { TableCol }
---        : VAR           { LCol $1 }
---        | '.' NUM       { LColInd $2 }
---        | VAR ':'VAR    { LColRen $1 $3 }
-
-
 
 ExpCond :: { TableCond }
         : TermCond                { $1 }

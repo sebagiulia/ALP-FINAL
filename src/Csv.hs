@@ -23,7 +23,7 @@ csvToTable name csvData = case decode NoHeader csvData of
                                       else let (cols, rows', typ) = processRows (V.toList rows)
                                            in if length cols /= length typ then Left "Tabla inconsistente."
                                               else case rows' of
-                                                      Right rs -> let cols' = map (\c -> (name, unpack c)) cols
+                                                      Right rs -> let cols' = map (\c -> ([name], unpack c)) cols
                                                                   in Right [(name, ((rs, name, cols'), (name, zip cols' typ)))]
                                                       Left err ->Left err
                         Left err -> Left err

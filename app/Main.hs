@@ -7,7 +7,7 @@ import           Control.Monad.Except
 import           Data.Char
 import           Data.List
 import           Data.Maybe
-import           Prelude                 hiding ( print )
+import           Prelude                 hiding ( print, error )
 import           System.Console.Haskeline
 import qualified Control.Monad.Catch           as MC
 import           System.Environment
@@ -16,11 +16,12 @@ import           Text.PrettyPrint.HughesPJ      ( render
                                                 , text
                                                 )
 
-import TableOperators
+import           TableOperators
 import           Common
 import           PrettyPrinter
 import           Simplytyped
 import           Parse
+import           Error
 ---------------------
 --- Interpreter
 ---------------------
@@ -47,7 +48,7 @@ data State = S
   ,     -- Ultimo archivo cargado (para hacer "reload")
     gv    :: NameEnv Table TableType  -- Entorno con variables globales y su valor  [(Name, (Value, Type))]
   , lv    :: NameEnv Table TableType -- Entorno con variables locales y su valor [(Name, (Value, Type))]
-  , ov :: [(String, Term)]
+  , ov    :: [(String, Term)]
   }
 
 iprompt :: State -> String
@@ -139,7 +140,7 @@ handleCommand state@(S inter lfile nq gv lv ov) cmd = case cmd of
     let s' = reverse (dropWhile isSpace (reverse (dropWhile isSpace s)))
     in  printPhrase s' >> return (Just state)
   Recompile -> if null lfile
-    then lift $ putStrLn "No hay un archivo cargado.\n" >> return (Just state)
+    then lift $ error "No hay un archivo cargado.\n" >> return (Just state)
     else handleCommand state (Compile (CompileFile lfile))
   FindType s -> do
     x' <- parseIO "<interactive>" term_parse s
@@ -147,7 +148,7 @@ handleCommand state@(S inter lfile nq gv lv ov) cmd = case cmd of
       Nothing -> return $ Left "Error en el parsing."
       Just x  -> return $ infer gv lv ov $ conversion $ x
     case t of
-      Left  err -> lift (putStrLn ("Error de tipos: " ++ err)) >> return ()
+      Left  err -> lift (typeError err) >> return ()
       Right t'  -> lift $ putStrLn $ render $ printType t'
     return (Just state)
 
@@ -225,8 +226,6 @@ printPhrase x = do
 printStmt :: Stmt (TableTerm, Term) -> InputT IO ()
 printStmt stmt = lift $ do
   let outtext = case stmt of
-        Table x (_, e) -> "def " ++ x ++ " = "-- ++ render (printTerm e)
-        Assign x (_, e) -> x ++ " -> " ++ render (printTerm e)
         Eval (d, e) ->
           "TableTerm AST:\n"
             ++ show d
@@ -234,6 +233,7 @@ printStmt stmt = lift $ do
             ++ show e
             ++ "\n\nSe muestra como:\n"
             ++ render (printTerm e)
+        _ -> show stmt
   putStrLn outtext
 
 parseIO :: String -> (String -> ParseResult a) -> String -> InputT IO (Maybe a)
@@ -251,29 +251,31 @@ handleStmt state stmt = lift $ do
     ImportCSV f v  -> checkImportCSV f v
     ExportCSV v f  -> checkExportCSV v f
     Table x e      -> checkDefTable x (conversion e)
-    Assign x e     -> if isUpper (head x) then putStrLn "Nombre de variable invalido" >> return state else checkType x (conversion e) 1
-    Eval e         -> checkType it (conversion e) 0 --
+    Assign x e     -> if isUpper (head x) 
+                      then error "Nombre de variable invalido, debe comenzar en minusculas." >> return state
+                      else checkType x (conversion e) 1
+    Eval e         -> checkType it (conversion e) 0
     DropTable v    -> checkDropTable v
     DropOp v       -> checkDropOp v
-    Operator v a e -> checkEvalOp v a e --
+    Operator v a e -> checkEvalOp v a e
   if (not (inter st)) then return st { nq = (nq st) + 1 }
                          else return st
  where
   checkDefTable i t = do
     if not (isUpper (head i))
-    then putStrLn "Error: Nombre de variable invalido, el primer caracter debe ser en mayusculas" >> return state
+    then error "Nombre de variable invalido, el primer caracter debe ser en mayusculas" >> return state
     else case infer (gv state) (lv state) (ov state) t of
-          Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
+          Left  err -> typeError err >> return state
           Right ty  -> do
             let v = evalDef i (gv state) (lv state) (ov state) t
             if (elem i (map fst (gv state)))
-            then do putStrLn ("Variable " ++ i ++ " actualizada.")
+            then do msg ("Variable " ++ i ++ " actualizada.")
                     return (state { gv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (gv state), lv = [] })
             else do putStrLn i   
                     return (state { gv = (i,(v,ty)) : gv state, lv = [] })
   checkType i t a = do
     case infer (gv state) (lv state) (ov state) t of
-      Left  err -> putStrLn ("Error de tipos: " ++ err) >> return state
+      Left  err -> typeError err >> return state
       Right ty  -> checkEval i t ty a
   checkEval i t ty a = do
     let v = eval (gv state) (lv state) (ov state) t
@@ -291,52 +293,49 @@ handleStmt state stmt = lift $ do
          else return (state {lv = []})
   checkImportDB d = do
     case getDBData d of
-      Left  err -> putStrLn ("Error: " ++ err) >> return state
+      Left  err -> error err >> return state
       Right dbData  -> do
         v <- evalImportDB dbData (gv state)
-        let outtext = case v of
-                        Right _ -> "Dataset cargado."
-                        Left ex -> show ex
-        putStrLn outtext
+        case v of
+          Right _ -> msg "Dataset cargado."
+          Left ex -> exError ex
         let newst = case v of
                       Right new -> new
                       _ -> (gv state)
         return (state { gv = newst})
   checkImportCSV f n = do
     case checkNameFileImport (gv state) f n of
-      Left err -> putStrLn ("Error: " ++ err) >> return state
+      Left err -> error err >> return state
       Right _ -> do
           v <- evalImportCSV f n (gv state)
-          let outtext = case v of
-                          Right ts -> "Tabla cargada: " ++ n
-                          Left err -> show err
-          putStrLn outtext
+          case v of
+           Right ts -> msg $ "Tabla cargada: " ++ n
+           Left err -> exError err
           let newst = case v of
                         Right new -> new
                         _ -> []
           return (state { gv = newst ++ gv state})
   checkExportCSV v f = do
     case checkNameFileExport (gv state) v f of
-      Left err -> putStrLn ("Error: " ++ err) >> return state
+      Left err -> error err >> return state
       Right f' -> do
           v <- evalExportCSV v f' (gv state)
-          let outtext = case v of
-                          Right _ -> "Archivo creado con exito."
-                          Left err -> show err
-          putStrLn outtext
+          case v of
+           Right _ -> msg "Archivo creado con exito."
+           Left ex ->  exError ex
           return state
   checkDropTable v = do
                   case evalDropTable (gv state) v of
-                      Left err -> putStrLn err >> return state
-                      Right st -> putStrLn ("Variable " ++ v ++ " eliminada.") >> return (state { gv = st })
+                      Left err -> error err >> return state
+                      Right st -> msg ("Variable " ++ v ++ " eliminada.") >> return (state { gv = st })
   checkDropOp v = do
                   case evalDropOp (ov state) v of
-                      Left err -> putStrLn err >> return state
-                      Right st -> putStrLn ("Operador " ++ v ++ " eliminado.") >> return (state { ov = st })
+                      Left err -> error err >> return state
+                      Right st -> msg ("Operador " ++ v ++ " eliminado.") >> return (state { ov = st })
   checkEvalOp v a e = do
                   case evalOperator (ov state) v a e of
-                    Left err -> putStrLn err >> return state
-                    Right st -> putStrLn ("Operador " ++ v ++ " cargado.") >> return (state { ov = st})
+                    Left err -> error err >> return state
+                    Right st -> msg ("Operador " ++ v ++ " cargado.") >> return (state { ov = st})
 
 prelude :: String
 prelude = "Ejemplos/Prelude.arsql"

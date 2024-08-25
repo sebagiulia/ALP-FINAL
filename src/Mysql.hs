@@ -44,7 +44,7 @@ mySQLValueToTableValue n = Str (show n) -- No deberia entrar
 
 getColumns :: [ColumnDef] -> TableName -> [Column]
 getColumns c  n = [show2 (columnName x) | x <- c ]
-                where show2 w = (n , init (tail (show w)))
+                where show2 w = ([n] , init (tail (show w)))
 
 getTables :: MySQLConn -> [[MySQLValue]] -> IO [(Table, [ColumnDef])] -- > [(table, tname, cnames)]
 getTables _ [] = return []

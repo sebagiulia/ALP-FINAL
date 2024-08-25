@@ -1,15 +1,19 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use zipWith" #-}
 
 module TableOperators where
 
 import Data.String
 import Data.List
+import Data.Function
+import Data.Maybe
 
 type TableName = String
 data TableValue = Str String | Numb Int deriving (Show, Eq)
 type TableRow = [TableValue]
 type ColumnName = String
-type Column = (TableName,ColumnName)
+type Column = ([TableName],ColumnName)
 type Table = ([TableRow],TableName, [Column])
 
 data Value = Col Column | Val TableValue
@@ -30,38 +34,32 @@ tableValueToString :: TableValue -> String
 tableValueToString (Str s) = s
 tableValueToString (Numb i) = show i
 
-------------------------------- DIVISION ------- Hay que chequear tipos --------------
-removeEquals :: Table -> Table
-removeEquals (rs, n, cs) = (nub rs, n, cs) 
+------------------------------- DIVISION -------------------------------------------------
+dropCols :: [Column] -> [Column] -> [Column]
+dropCols _ []  = []
+dropCols [] ts  = ts
+dropCols (c:cols) (t:tcols) = if snd c == snd t
+                              then if null (fst c) && length (fst t) == 1
+                                   then dropCols cols tcols
+                                   else ((fst t \\ fst c), snd c):dropCols cols tcols
+                              else t:dropCols (c:cols) tcols
+
 
 removeCols :: [Column] -> [Column] -> [Column]
 removeCols [] b = []
-removeCols (ac:acs) b = if exist ac b then removeCols acs b
-                                       else ac:removeCols acs b
-                      where exist _ [] = False
-                            exist co (col:columns) = snd co == snd col || exist co columns
+removeCols from rem = let torem = sortCols rem from
+                      in filter (\(t,c) -> not (null t)) $ dropCols torem from
 
--- r/s = ΠR−S (r) − ΠR−S {[ΠR−S (r) × s] − r}
---       ---p1---         ---p1---   
---                        ------p2-----
---                        --------p3--------                
---                  -----------p4------------                
 divtables :: Table -> Table -> Table
 divtables t1@(_,_,acols) t2@(_,_,bcols) = let rest = removeCols acols bcols
                                               p1 = proy rest t1
                                               p2 = pcart p1 t2
                                               p3 = difftables p2 t1
                                               p4 = proy rest p3
-                                          in removeEquals $ difftables p1 p4
+                                          in difftables p1 p4
 
-{-
 
-104 1 -> 104 1 - 104 1 
-104 2 -> 104 1
-
--}
-
-------------------------------- PRODUCTO NATURAL ------- Hay que chequear tipos --------------
+------------------------------- PRODUCTO NATURAL --------------------------------------------
 combineCols :: [Column] -> [Column]
 combineCols [] = []
 combineCols (c: cs) = let (_, rest) = lookFor (snd c) cs
@@ -74,7 +72,16 @@ combineCols (c: cs) = let (_, rest) = lookFor (snd c) cs
 -- Funcion que genera el arbol de condicion para producto natural.
 prodNatCondition :: [Column] -> Condition
 prodNatCondition [] = Empty
-prodNatCondition (c:cols) = let (sames, rest) = lookFor (snd c) cols -- Busco las columnas con el mismo nombre
+prodNatCondition (c:cols) = if length (fst c) == 1
+                            then prodNatCondition cols
+                            else And (f (fst c) (head (fst c))) (prodNatCondition cols)
+                            where f [] _ = Empty
+                                  f [c1'] v = Eq (Col ([c1'], snd c)) (Col ([v], snd c))
+                                  f (c1':c2':cs') v = And (Eq (Col ([c1'], snd c)) (Col ([c2'], snd c))) (f cs' v)
+
+
+
+    {- let (sames, rest) = lookFor (snd c) cols -- Busco las columnas con el mismo nombre
                                 cond = equals c sames -- Genero el arbol de condicion
                             in And cond (prodNatCondition rest)
                             where lookFor _ [] = ([],[])
@@ -82,14 +89,14 @@ prodNatCondition (c:cols) = let (sames, rest) = lookFor (snd c) cols -- Busco la
                                                         in if snd col == n then (col:eq', rest')
                                                                            else (eq', col:rest')
                                   equals _ [] = Empty
-                                  equals col (same:ss) = And (Eq (Col col) (Col same)) (equals col ss)
+                                  equals col (same:ss) = And (Eq (Col col) (Col same)) (equals col ss) -}
 
 pnat :: Table -> Table -> Table
-pnat t1 t2 = let t'@(_, _, cols') = pcart t1 t2
-                 cond = prodNatCondition cols'
-                 t = sel t' cond
-                 cols = combineCols cols'
-             in proy cols t
+pnat t1@(_,n1,_) t2@(_,n2,_) = let t'@(_, _, cols') = pcart t1 t2
+                                   cond = prodNatCondition cols'
+                                   t = sel t' cond
+                                   cols = map (\(ts, cn) -> ([head ts], cn)) cols'
+                               in ren (proy cols t) (n1 ++ "|*|" ++ n2)
 
 ------------------------------- INTERSECCION ----------- Hay que chequear tipos --------------
 int :: Table -> Table -> Table
@@ -100,35 +107,44 @@ ren :: Table -> TableName -> Table
 ren (rs, _, cs) n = let ncs = renCols n cs
                     in (rs, n, ncs)
                     where renCols n [] = []
-                          renCols n (c:cs') = (n, snd c):renCols n cs'
+                          renCols n (c:cs') = if length (fst c) > 1
+                                              then c:renCols n cs'
+                                              else ([n], snd c):renCols n cs'
 
 ------------------------------- PRODUCTO CARTESIANO ----------- Hay que chequear tipos --------------
-bindRows :: TableRow -> [TableRow] -> [TableRow]
-bindRows r (r':rs) = ((r ++ r') : (bindRows r rs))
-bindRows _ [] = []
-
-combineRows :: [TableRow] -> [TableRow] -> [TableRow]
-combineRows [] _ = []
-combineRows (ar:ars) rs = let ars' = bindRows ar rs
-                         in ars' ++ (combineRows ars rs)
+concatColsRows :: ([Column], [Column]) -> ([TableRow],[TableRow]) -> ([Column],[TableRow])
+concatColsRows (xs, ys) (rs , rs') = let colrows = map combineGroup grouped
+                                         cols = map fst colrows
+                                         alignedRows = concatMap snd colrows
+                                     in (cols, transpose alignedRows)
+  where
+    combined = zip (xs ++ ys) (transpose (concatMap (\r -> map (uncurry (++). (r,)) rs') rs))
+    sorted = sortBy (compare `on` (snd. fst)) combined
+    grouped = groupBy ((==) `on` (snd. fst)) sorted -- Agrupamos por nombre de columna
+    -- Para columnas con el mismo nombre, agrupamos segun tabla de origen: ([t1,t2], cname)
+    combineGroup grp = ((concatMap (fst. fst) grp, (snd. fst) (head grp)), map snd grp)
 
 pcart :: Table -> Table -> Table -- aname y bname tienen que ser distintos
-pcart (arows, _, acols) (brows, _, bcols) = let cols = acols ++ bcols
-                                                rs = combineRows arows brows
+pcart (arows, _, acols) (brows, _, bcols) = let (cols, rs) = concatColsRows (acols,bcols) (arows,brows)
                                             in (rs, "X", cols)
 
-------------------------------- DIFERENCIA  ----------- Hay que chequear tipos --------------
+------------------------------- DIFERENCIA  --------------------------------------------------------
 existRow :: [Column] -> TableRow -> [Column] -> [TableRow] -> Bool
-existRow acols a bcols brs = let ar' = zip acols a
-                                 brs' = map (zip bcols) brs
-                             in searchIn ar' brs'
-                             where searchIn _ [] = False
-                                   searchIn arow (brow:bs') = compareRows arow brow || searchIn arow bs'
-                                   compareRows [] _ = True
-                                   compareRows (a': as') brow = case lookup (snd (fst a')) (map (\(c, v) -> (snd c, v)) brow) of
-                                                                  Nothing -> False
-                                                                  Just av -> av == snd a' && compareRows as' brow
-
+existRow [] _ _ _ = False
+existRow _ [] _ _ = False
+existRow _ _ [] _ = False
+existRow _ _ _ [] = False
+existRow acols a bcols (b:brs) = a == sortedb || existRow acols a bcols brs
+                   where sortedb = concat sortedByTable
+                         sortedByTable = map (\(t,((t', _),r)) -> 
+                                              map snd (sortOn (\(z,_) -> 
+                                                               fromMaybe (length (fst t)) (elemIndex z (fst t))) 
+                                                  (zip t' r)))
+                                             (zip acols sortedByCol)
+                         sortedByCol = sortOn (\x -> fromMaybe (length acols) (elemIndex (snd (fst x)) (map snd acols))) grouped
+                         grouped = f bcols b
+                         f [] _ = []
+                         f (bc@(l, _):bcs) b = (bc, take (length l) b): f bcs (drop (length l) b)
 
 removeRows :: [Column] -> [TableRow] -> [Column] -> [TableRow] -> [TableRow]
 removeRows acols [] bcols b = []
@@ -142,23 +158,9 @@ difftables (ars, _, acols) (brs, _, bcols) = let rs = removeRows acols ars bcols
                                          in (rs , "difftables", acols)
 
 ------------------------------- UNION  ----------- Hay que chequear tipos --------------
-compareRow :: TableRow -> TableRow -> Bool
-compareRow (v:vs) (v':vs') = (extractVal v) == (extractVal v') && compareRow vs vs'
-compareRow _ _ = True
-
-removeRow :: TableRow -> [TableRow] -> [TableRow]
-removeRow _ [] = []
-removeRow r (r':rs) = if compareRow r r' then removeRow r rs
-                                          else (r': removeRow r rs)
-
-removeEqRows :: Table -> Table
-removeEqRows ((r:rs), name, cols) = let rs' = removeRow r rs
-                                        (rs'', _, _) = removeEqRows (rs', name, cols)
-                                    in (r:rs'', name, cols)
-removeEqRows t = t
 
 uni :: Table -> Table -> Table
-uni (arows, _, acols) (brows, _, _) = removeEqRows (arows ++ brows, "uni", acols)
+uni (arows, _, acols) (brows, _, _) = (nub (arows ++ brows), "uni", acols)
 
 ------------------------------- SELECCION  ----------- Hay que chequear tipos --------------
 
@@ -168,7 +170,10 @@ extractVal (Str t) = Right t
 
 getVal :: Value -> TableRow -> [Column] -> Either Bool TableValue
 getVal (Val s) _ _ = Right s
-getVal (Col var) (r:rs) (c:cs) = if snd var == snd c && ( fst var == fst c || fst c == "") then Right r
+getVal (Col var) (r:rs) (c:cs) = if snd var == snd c
+                                 then (if (length (fst c) == 1) || (head (fst c) == head (fst var))
+                                       then Right r
+                                       else getVal (Col var) rs ((tail (fst c), snd c):cs))
                                  else getVal (Col var) rs cs
 getVal _ [] _ = Left False
 getVal _ _ [] = Left False
@@ -233,28 +238,31 @@ sel (r:rs, name, cols) cond = let (rs', _, _) = sel (rs, name, cols) cond
 
 ------------------------------- PROYECCION ---------------------------------------------
 -- Devuelve los elementos de la fila correspondiente a las columnas
-cutCol :: (TableRow, [Column]) -> [Column] -> TableRow
-cutCol (v:vs,c:cols) (cc:ccols) = if  snd c == snd cc &&
-                                          (fst c == fst cc ||
-                                           fst cc == "") then v: cutCol (vs, cols) ccols
-                                                         else cutCol (vs, cols) (cc:ccols)
-cutCol _ _ = []
+cutCol :: TableRow -> [Column] -> [Column] -> TableRow
+cutCol (v:vs) ((tcs, tc):tcols) ((ts,c):cols) | null tcs = cutCol (v:vs) tcols ((ts, c):cols)
+                                              | null ts = cutCol (v:vs) ((tcs, tc):tcols) cols
+                                              | tc == c = if head tcs == head ts
+                                                          then v:cutCol vs ((tail tcs, tc):tcols) ((tail ts, c):cols)
+                                                          else cutCol vs ((tail tcs, tc):tcols) ((ts, c):cols)
+                                              | otherwise = cutCol vs tcols ((ts,c):cols)
+cutCol _ _ _ = []
 
 -- Devuelve ls filas cortadas a partir de las columnas [cols]
 cutCols :: ([TableRow], [Column]) -> [Column] -> [TableRow]
 cutCols ([], _) _ = []
-cutCols (r:rows, tcols) cols = let r' = cutCol (r, tcols) cols
+cutCols (r:rows, tcols) cols = let r' = cutCol r tcols cols
                                    rows' = cutCols (rows, tcols) cols
                                in (r':rows')
 
 sortCols :: [Column] -> [Column] -> [Column]
 sortCols _ [] = []
-sortCols cols (c:cs) = if exist c cols then c:sortCols cols cs
-                                        else sortCols cols cs
-                        where exist _ [] = False
-                              exist co (col:columns) = (snd co == snd col &&
-                                                          (fst co == fst col ||
-                                                           fst col == "")) || exist co columns
+sortCols [] _ = []
+sortCols cs ts@(tc:tcols) = let (c:cols) = sortOn (\x -> fromMaybe (length ts) (elemIndex (snd x) (map snd ts))) cs
+                            in if snd c == snd tc
+                               then if null (fst c)
+                                    then tc:sortCols cols tcols
+                                    else (fst tc \\ (fst tc \\ fst c) , snd c):sortCols cols tcols
+                               else sortCols (c:cols) tcols
 
 proy :: [Column] -> Table -> Table
 proy [] (_, tname, _) = ([], tname, [])
