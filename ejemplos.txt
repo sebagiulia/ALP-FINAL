@@ -1,6 +1,5 @@
-<>- cambiar logica de nombre de columnas, que se guarde el nombre de tabla origen cuando se repiten nombres              -<>
-<>- Quitar los imports inservibles                                                                                       -<>
 <>- Achicar state para que sea mas lejible                                                                               -<>
 <>- Terminar de corregir el Main                                                                                         -<>
 <>- Comentar el codigo                                                                                                   -<>
-<>- Limpiar el codigo
+<>- Limpiar el codigo                                                                                                    -<>
+<>- Probar con practica de TDB                                                                                           -<>
