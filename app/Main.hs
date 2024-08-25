@@ -267,12 +267,16 @@ handleStmt state stmt = lift $ do
     else case infer (gv state) (lv state) (ov state) t of
           Left  err -> typeError err >> return state
           Right ty  -> do
-            let v = evalDef i (gv state) (lv state) (ov state) t
-            if (elem i (map fst (gv state)))
-            then do msg ("Variable " ++ i ++ " actualizada.")
-                    return (state { gv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (gv state), lv = [] })
-            else do putStrLn i   
-                    return (state { gv = (i,(v,ty)) : gv state, lv = [] })
+            let r = evalInferDef i (gv state) (lv state) (ov state) t
+            case r of
+              Left err -> typeError err >> return state
+              Right (v, ty) -> 
+                  if (elem i (map fst (gv state)))
+                  then do msg ("Variable " ++ i ++ " actualizada.")
+                          return (state { gv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (gv state), lv = [] })
+                  else do putStrLn i   
+                          return (state { gv = (i,(v,ty)) : gv state, lv = [] })
+            
   checkType i t a = do
     case infer (gv state) (lv state) (ov state) t of
       Left  err -> typeError err >> return state

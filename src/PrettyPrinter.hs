@@ -12,6 +12,8 @@ import           TableOperators
 import           Common
 import           Text.PrettyPrint.HughesPJ
 import           Prelude                 hiding ( (<>) )
+import Text.PrettyPrint.ANSI.Leijen (Pretty(pretty, prettyList))
+import qualified Text.PrettyPrint.ANSI.Leijen as P
 
 ------------  
 
@@ -49,9 +51,7 @@ printTable = pp
 printType :: TableType -> Doc
 printType (_, cs) = printType' cs
   where printType' [] = text ""
-        printType' ((c,t):cols) = text (snd c) <> text ": " <> ptype t
-                                  <> text "\n" <>
-                                  printType' cols
+        printType' ((c,t):cols) = foldr (\n p -> text n <> text "." <> text (snd c) <> text ": " <> ptype t <> text "\n" <> p) (printType' cols) (fst c)
         ptype StrT = text "String"
         ptype IntT = text "Integer"
 

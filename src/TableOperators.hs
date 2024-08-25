@@ -60,15 +60,6 @@ divtables t1@(_,_,acols) t2@(_,_,bcols) = let rest = removeCols acols bcols
 
 
 ------------------------------- PRODUCTO NATURAL --------------------------------------------
-combineCols :: [Column] -> [Column]
-combineCols [] = []
-combineCols (c: cs) = let (_, rest) = lookFor (snd c) cs
-                      in (c: combineCols rest)
-                      where lookFor _ [] = ([],[])
-                            lookFor n (col:cols) = let (eq', rest') = lookFor n cols
-                                                   in if snd col == n then (col:eq', rest')
-                                                                      else (eq', col:rest')
-
 -- Funcion que genera el arbol de condicion para producto natural.
 prodNatCondition :: [Column] -> Condition
 prodNatCondition [] = Empty
@@ -106,10 +97,10 @@ int t1 t2 = difftables t1 (difftables t1 t2)
 ren :: Table -> TableName -> Table
 ren (rs, _, cs) n = let ncs = renCols n cs
                     in (rs, n, ncs)
-                    where renCols n [] = []
-                          renCols n (c:cs') = if length (fst c) > 1
-                                              then c:renCols n cs'
-                                              else ([n], snd c):renCols n cs'
+                    where renCols name [] = []
+                          renCols name (c:cs') = if length (fst c) > 1
+                                              then c:renCols name cs'
+                                              else ([name], snd c):renCols name cs'
 
 ------------------------------- PRODUCTO CARTESIANO ----------- Hay que chequear tipos --------------
 concatColsRows :: ([Column], [Column]) -> ([TableRow],[TableRow]) -> ([Column],[TableRow])
@@ -244,7 +235,7 @@ cutCol (v:vs) ((tcs, tc):tcols) ((ts,c):cols) | null tcs = cutCol (v:vs) tcols (
                                               | tc == c = if head tcs == head ts
                                                           then v:cutCol vs ((tail tcs, tc):tcols) ((tail ts, c):cols)
                                                           else cutCol vs ((tail tcs, tc):tcols) ((ts, c):cols)
-                                              | otherwise = cutCol vs tcols ((ts,c):cols)
+                                              | otherwise = cutCol (drop (length tcs) (v:vs)) tcols ((ts,c):cols)
 cutCol _ _ _ = []
 
 -- Devuelve ls filas cortadas a partir de las columnas [cols]
@@ -257,12 +248,15 @@ cutCols (r:rows, tcols) cols = let r' = cutCol r tcols cols
 sortCols :: [Column] -> [Column] -> [Column]
 sortCols _ [] = []
 sortCols [] _ = []
-sortCols cs ts@(tc:tcols) = let (c:cols) = sortOn (\x -> fromMaybe (length ts) (elemIndex (snd x) (map snd ts))) cs
-                            in if snd c == snd tc
-                               then if null (fst c)
-                                    then tc:sortCols cols tcols
-                                    else (fst tc \\ (fst tc \\ fst c) , snd c):sortCols cols tcols
-                               else sortCols (c:cols) tcols
+sortCols cs ts@(tc:tcols) = let scols = sortOn (\x -> fromMaybe (length ts) (elemIndex (snd x) (map snd ts))) cs
+                            in sortCols' scols ts
+                    where sortCols' _ [] = []
+                          sortCols' [] _ = [] 
+                          sortCols' (c:cols) (t':ts') = if snd c == snd t'
+                                                        then if null (fst c)
+                                                             then t':sortCols' cols ts'
+                                                             else (fst t' \\ (fst t' \\ fst c) , snd c):sortCols' cols ts'
+                                                        else sortCols' (c:cols) ts'
 
 proy :: [Column] -> Table -> Table
 proy [] (_, tname, _) = ([], tname, [])

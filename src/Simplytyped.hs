@@ -6,7 +6,7 @@ module Simplytyped
   (
   conversion,
   infer,
-  evalDef,
+  evalInferDef,
   eval,
   evalImportCSV,
   evalImportDB,
@@ -55,7 +55,7 @@ columns :: TableCols -> [Column]
 columns [] = []
 columns ((LVar v):cs) = let cs' = columns cs
                             c' = separeAtDot v
-                        in (c':cs')
+                        in map (\grp -> (concatMap fst grp, snd (head grp))) $ groupBy ((==) `on` snd) (sortBy (compare `on` snd) (c':cs'))
 
 
 value :: TableAtom -> Value
@@ -93,9 +93,10 @@ conversion' l (LUni t1 t2) = Uni (conversion' l t1) (conversion' l t2)
 conversion' l (LInt t1 t2) = Int (conversion' l t1) (conversion' l t2)
 conversion' l (LApp op args) = App op args
 
-evalDef :: TableName -> NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Table
-evalDef n g l o t = let tab = eval g l o t
-                    in ren tab n
+evalInferDef :: TableName -> NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Either String (Table, TableType)
+evalInferDef n g l o t = case infer g l o (Ren n t) of
+                           Left err  -> Left err
+                           Right typ -> Right (eval g l o (Ren n t), typ)   
 
 -- evaluador de términos
 eval :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Table
@@ -253,9 +254,7 @@ infer' c e l o (Proy cs t) = case infer' c e l o t of
                                       err -> err
                           err     -> err
 infer' c e l o (Ren n t) = case infer' c e l o t of
-                            Right ty -> if maximum (map (\((ot,_), _) -> length ot) (snd ty)) > 1
-                                        then Left "Hay columnas con el mismo nombre."
-                                        else ret (n, map (\((l, cn), t) -> 
+                            Right ty -> ret (n, map (\((l, cn), t) -> 
                                                           if length l == 1 
                                                           then (([n], cn), t)
                                                           else ((l, cn), t)) (snd ty))
@@ -328,13 +327,13 @@ proyInfer :: [Column] -> TableType -> Either String TableType
 proyInfer [] (n,_) = Right (n, [])
 proyInfer _ (n, []) = Right (n, [])
 proyInfer (c:cs) (n, ts) = case lookup (snd c) (map (\((x,y),z) -> (y,(x,z))) ts) of
-                        Nothing -> proyInfer cs (n, ts)
+                        Nothing -> Left $ "Columna " ++ snd c ++ " invalida."
                         Just (ot,t) -> case proyInfer cs (n, ts) of
                                         Right (_, ts') -> if null (fst c)
                                                           then if length ot > 1
                                                                then Left "Columna ambigua, nombres repetidos."
                                                                else Right (n, ((ot, snd c),t):ts')
-                                                          else if isSubsequenceOf (fst c) ot
+                                                          else if foldr (\e b-> b && elem e ot) True (fst c)
                                                                then Right (n, (c,t):ts')
                                                                else Left "Alguna/s columnas inexistentes."
                                         Left err -> Left err
