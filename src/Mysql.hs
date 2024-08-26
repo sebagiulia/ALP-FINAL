@@ -12,6 +12,7 @@ import qualified Data.ByteString.Char8 as B
 import qualified Data.Text as T
 import Control.Exception (SomeException, Exception, toException, catch, IOException, throw)
 
+-- Funciones para manejar la conexion de base de datos mysql y transferir los datos en el formato adecuado.
 
 getDBData :: ConnWords -> Either String ConnectInfo
 getDBData = getDBData' defaultConnectInfo
@@ -46,7 +47,7 @@ getColumns :: [ColumnDef] -> TableName -> [Column]
 getColumns c  n = [show2 (columnName x) | x <- c ]
                 where show2 w = ([n] , init (tail (show w)))
 
-getTables :: MySQLConn -> [[MySQLValue]] -> IO [((TableName, Table), [ColumnDef])] -- > [(table, tname, cnames)]
+getTables :: MySQLConn -> [[MySQLValue]] -> IO [((TableName, Table), [ColumnDef])]
 getTables _ [] = return []
 getTables conn (l:ls) = do let tableName = getName (head l)
                            (cdef, is) <- query_ conn (fromString ("select * from " ++ tableName))

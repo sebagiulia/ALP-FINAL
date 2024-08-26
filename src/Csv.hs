@@ -10,9 +10,10 @@ import Data.ByteString.Lazy.Internal as B ( ByteString )
 import  Data.Text (Text, pack, unpack, strip)
 import qualified Data.Text as T
 
+-- Funciones para manejar la importacion/exportacion de archivos y transferir los datos en el formato adecuado.
 
 tableToCsv :: Table -> String
-tableToCsv (rows, cols) = let tcols = intercalate "," (map snd cols)
+tableToCsv (rows, cols) = let tcols = intercalate "," (concatMap (\(ts, c) -> (map (\t -> t ++ "." ++ c) ts)) cols)
                               trows = map (intercalate "," . map tableValueToString) rows
                           in intercalate "\r\n" (tcols:trows)
 
@@ -28,8 +29,7 @@ csvToTable name csvData = case decode NoHeader csvData of
                                                       Left err ->Left err
                         Left err -> Left err
 
--- Convierte una cadena en Int32, si es posible
--- Procesa filas y convierte los valores numéricos
+
 processRows :: [[String]] -> ([Text], Either String [TableRow], [Type])
 processRows [] = ([], Right [], [])
 processRows (header:rest) = let typ = getType (head rest)

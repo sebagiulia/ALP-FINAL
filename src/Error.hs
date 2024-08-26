@@ -6,6 +6,8 @@ import Control.Exception
 newtype Error = Error String deriving (Show)
 instance Exception Error
 
+-- Funciones para impresiones de error
+
 error :: String -> IO ()
 error s = putStrLn $ "Error: " ++ s
 
