@@ -39,17 +39,17 @@ prettyTable rows =
 
 ------------
 pp :: Table -> Doc
-pp (rows, tname, cols) = let colsList =  concatMap fc cols :: [String]
-                             rowsList = map (map tableValueToString) rows :: [[String]]
-                         in prettyTable $ colsList : rowsList
-                         where fc l = if length (fst l) > 1
-                                      then map (\t -> t ++ "." ++ snd l) (fst l)
-                                      else [snd l]
+pp (rows, cols) = let colsList =  concatMap fc cols :: [String]
+                      rowsList = map (map tableValueToString) rows :: [[String]]
+                  in prettyTable $ colsList : rowsList 
+                  where fc l = if length (fst l) > 1
+                               then map (\t -> t ++ "." ++ snd l) (fst l)
+                               else [snd l]
 printTable :: Table -> Doc
-printTable = pp
+printTable = pp  
 
 printType :: TableType -> Doc
-printType (_, cs) = printType' cs
+printType (name, cs) = text ("Table: " ++ name ++ "\n") <> printType' cs
   where printType' [] = text ""
         printType' ((c,t):cols) = foldr (\n p -> text n <> text "." <> text (snd c) <> text ": " <> ptype t <> text "\n" <> p) (printType' cols) (fst c)
         ptype StrT = text "String"

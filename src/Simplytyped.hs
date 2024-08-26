@@ -42,7 +42,7 @@ import Data.Function
 
 
 emptytable :: Table
-emptytable = ([], "null", [])
+emptytable = ([], [])
 
 -- Separe between TableName and ColumnName
 -- Example: "Movies.name" -> C "Movies" "name" 
@@ -96,11 +96,13 @@ conversion' l (LApp op args) = App op args
 evalInferDef :: TableName -> NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Either String (Table, TableType)
 evalInferDef n g l o t = case infer g l o (Ren n t) of
                            Left err  -> Left err
-                           Right typ -> Right (eval g l o (Ren n t), typ)   
+                           Right typ -> let (rs, cs) = eval g l o (Ren n t)
+                                        in Right ((nub rs, cs), typ)   
 
 -- evaluador de términos
 eval :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Table
-eval = eval' []
+eval g l o t = let (rs, cs) = eval' [] g l o t
+               in (nub rs, cs)
 
 eval' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType ->  [(String, Term)] -> Term -> Table
 eval' _ e l o (GlobalTableVar v) = fst $ fromJust $ lookup v e
@@ -132,10 +134,24 @@ eval' a g l o (App op args) = case lookup op o of
 conversionOperator :: [TableName] -> TableTerm -> Term
 conversionOperator args t = conversion' (zip args [0..]) t
 
-evalOperator :: [(String, Term)] -> String -> OperatorArgs -> TableTerm -> Either String [(String, Term)]
-evalOperator ops v args t = case lookup v ops of
+checkArgs :: OperatorArgs -> NameEnv Table TableType -> Either String OperatorArgs
+checkArgs args local = if foldr (\a g -> (isUpper . head) a || g) False args
+                       then Left "Argumentos invalidos, deben iniciar con minuscula."
+                       else case foldr f (Right args) args of
+                              Left err -> Left err
+                              Right _  -> Right args
+                      where f s (Left err) = Left err
+                            f s _          = case lookup s local of
+                                                Just _ -> Left $ "Variable local existente: " ++ s 
+                                                _ -> Right args
+                            
+
+evalOperator :: [(String, Term)] -> NameEnv Table TableType  -> String -> OperatorArgs -> TableTerm -> Either String [(String, Term)]
+evalOperator ops local v args t = case lookup v ops of
                               Just _ -> Left "Opeador existente."
-                              Nothing -> Right $ (v,conversionOperator args t):ops
+                              Nothing -> case checkArgs args local of
+                                          Right _ -> Right $ (v,conversionOperator args t):ops
+                                          Left err -> Left err
 
 
 
@@ -282,14 +298,14 @@ infer' c e l o (Uni t1 t2) = case infer' c e l o t1 of
                              Right (n1, t1cs) -> case infer' c e l o t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareCols (n1, t1cs) (n2, t2cs) of
-                                                                       Right (_,t) -> ret (n1 ++ " U " ++ n2, t)
+                                                                       Right (_,t) -> ret (n1 ++ "U" ++ n2, t)
                                                                        err -> err
 infer' c e l o (Int t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
                              Right (n1, t1cs) -> case infer' c e l o t2 of
                                                   Left e  -> err e
                                                   Right (n2, t2cs) -> case compareCols (n1, t1cs) (n2, t2cs) of
-                                                                       Right (_,t) -> ret (n1 ++ " I " ++ n2, t)
+                                                                       Right (_,t) -> ret (n1 ++ "I" ++ n2, t)
                                                                        err -> err
 infer' c e l o (Diff t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e

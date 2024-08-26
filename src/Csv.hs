@@ -12,9 +12,9 @@ import qualified Data.Text as T
 
 
 tableToCsv :: Table -> String
-tableToCsv (rows, _, cols) = let tcols = intercalate "," (map snd cols)
-                                 trows = map (intercalate "," . map tableValueToString) rows
-                             in intercalate "\r\n" (tcols:trows)
+tableToCsv (rows, cols) = let tcols = intercalate "," (map snd cols)
+                              trows = map (intercalate "," . map tableValueToString) rows
+                          in intercalate "\r\n" (tcols:trows)
 
 csvToTable :: TableName -> B.ByteString -> Either String (NameEnv Table TableType)
 csvToTable name csvData = case decode NoHeader csvData of
@@ -24,7 +24,7 @@ csvToTable name csvData = case decode NoHeader csvData of
                                            in if length cols /= length typ then Left "Tabla inconsistente."
                                               else case rows' of
                                                       Right rs -> let cols' = map (\c -> ([name], unpack c)) cols
-                                                                  in Right [(name, ((rs, name, cols'), (name, zip cols' typ)))]
+                                                                  in Right [(name, ((rs, cols'), (name, zip cols' typ)))]
                                                       Left err ->Left err
                         Left err -> Left err
 

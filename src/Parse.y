@@ -37,14 +37,15 @@ import Data.Char
     '"'      { TQuote }
     CSV      { TCsv }
     AS       { TAs }
-    DROP       { TDrop }
+    DROP     { TDrop }
     IMPORT   { TImport }
     EXPORT   { TExport }
     DATABASE { TDatabase }
-    TABLE      { TTable }
+    TABLE    { TTable }
     STRING   { TString $$ }
     VAR      { TVar $$ }
     NUM      { TNum $$ }
+    TEXT     { TText }
     SEL      { TSelect }
     PROY     { TProy }
     REN      { TRen }
@@ -62,7 +63,6 @@ import Data.Char
 %left 'U' 'I'
 %left '-'
 %left '=' '&' '|' '*' '|*|' 
-%right '->'
 %right PROY SELECT
 
 
@@ -74,9 +74,9 @@ Def     :  Defexp                                { $1 }
         | IMPORT DATABASE '[' ConnWords ']'      { ImportDB $4 }
         | EXPORT CSV VAR AS VAR                  { ExportCSV $3 $5 }
         | Drop                                   { $1 }
+        | TEXT '['STRING ']'                            { Text $3 }
         | Exp	                                 { Eval $1 }
         | OPERATOR VAR '=' '(' Args ')' '=>' Exp { Operator $2 $5 $8 }
-        | '(' Def ')'                            { $2 }
 Defexp  :  TABLE VAR '=' Exp                       { Table $2 $4 }
 Assign : VAR '->' Exp                            { Assign $1 $3 }
              
@@ -186,6 +186,7 @@ data Token = TVar String
                | TSelect
                | TProy
                | TRen
+               | TText
                | TDot
                | TQuote
                | TTable
@@ -259,9 +260,10 @@ lexer cont s = case s of
                               ("database",rest) -> cont TDatabase rest
                               ("table", rest) -> cont TTable rest
                               ("operator", rest) -> cont TOperator rest
-                              ("S",rest)   -> cont TSelect rest
-                              ("P", rest)   -> cont TProy rest
-                              ("R", rest)   -> cont TRen rest
+                              ("S",('[':rest))   -> cont TSelect ('[':rest)
+                              ("P", ('[':rest))   -> cont TProy ('[':rest)
+                              ("R", ('[':rest))   -> cont TRen ('[':rest)
+                              ("T", ('[':rest))   -> cont TText ('[':rest)
                               ("U", rest)   -> cont TUni rest
                               ("I", rest)   -> cont TInt rest
                               (var,rest)     -> cont (TVar var) rest

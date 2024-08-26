@@ -14,7 +14,7 @@ data TableValue = Str String | Numb Int deriving (Show, Eq)
 type TableRow = [TableValue]
 type ColumnName = String
 type Column = ([TableName],ColumnName)
-type Table = ([TableRow],TableName, [Column])
+type Table = ([TableRow],[Column])
 
 data Value = Col Column | Val TableValue
                deriving(Show)
@@ -30,11 +30,12 @@ data Condition = And Condition Condition
                deriving(Show)
 
 --------------------------------------------------------------------------------------
+
 tableValueToString :: TableValue -> String
 tableValueToString (Str s) = s
 tableValueToString (Numb i) = show i
 
-------------------------------- DIVISION -------------------------------------------------
+------------------------------- DIVISION ---------------------------------------------
 dropCols :: [Column] -> [Column] -> [Column]
 dropCols _ []  = []
 dropCols [] ts  = ts
@@ -51,12 +52,12 @@ removeCols from rem = let torem = sortCols rem from
                       in filter (\(t,c) -> not (null t)) $ dropCols torem from
 
 divtables :: Table -> Table -> Table
-divtables t1@(_,_,acols) t2@(_,_,bcols) = let rest = removeCols acols bcols
-                                              p1 = proy rest t1
-                                              p2 = pcart p1 t2
-                                              p3 = difftables p2 t1
-                                              p4 = proy rest p3
-                                          in difftables p1 p4
+divtables t1@(_,acols) t2@(_,bcols) = let rest = removeCols acols bcols
+                                          p1 = proy rest t1
+                                          p2 = pcart p1 t2
+                                          p3 = difftables p2 t1
+                                          p4 = proy rest p3
+                                      in difftables p1 p4
 
 
 ------------------------------- PRODUCTO NATURAL --------------------------------------------
@@ -70,24 +71,13 @@ prodNatCondition (c:cols) = if length (fst c) == 1
                                   f [c1'] v = Eq (Col ([c1'], snd c)) (Col ([v], snd c))
                                   f (c1':c2':cs') v = And (Eq (Col ([c1'], snd c)) (Col ([c2'], snd c))) (f cs' v)
 
-
-
-    {- let (sames, rest) = lookFor (snd c) cols -- Busco las columnas con el mismo nombre
-                                cond = equals c sames -- Genero el arbol de condicion
-                            in And cond (prodNatCondition rest)
-                            where lookFor _ [] = ([],[])
-                                  lookFor n (col:cs) = let (eq', rest') = lookFor n cs
-                                                        in if snd col == n then (col:eq', rest')
-                                                                           else (eq', col:rest')
-                                  equals _ [] = Empty
-                                  equals col (same:ss) = And (Eq (Col col) (Col same)) (equals col ss) -}
-
 pnat :: Table -> Table -> Table
-pnat t1@(_,n1,_) t2@(_,n2,_) = let t'@(_, _, cols') = pcart t1 t2
-                                   cond = prodNatCondition cols'
-                                   t = sel t' cond
-                                   cols = map (\(ts, cn) -> ([head ts], cn)) cols'
-                               in ren (proy cols t) (n1 ++ "|*|" ++ n2)
+pnat t1 t2 = let t'@(_, cols') = pcart t1 t2
+                 cond = prodNatCondition cols'
+                 t = sel t' cond
+                 cols = map (\(ts, cn) -> ([head ts], cn)) cols'
+                 (rs,cs) = proy cols t 
+             in (rs, cs)
 
 ------------------------------- INTERSECCION ----------- Hay que chequear tipos --------------
 int :: Table -> Table -> Table
@@ -95,12 +85,12 @@ int t1 t2 = difftables t1 (difftables t1 t2)
 
 ------------------------------- RENOMBRAMIENTO -------------------------------------------------
 ren :: Table -> TableName -> Table
-ren (rs, _, cs) n = let ncs = renCols n cs
-                    in (rs, n, ncs)
-                    where renCols name [] = []
-                          renCols name (c:cs') = if length (fst c) > 1
-                                              then c:renCols name cs'
-                                              else ([name], snd c):renCols name cs'
+ren (rs, cs) n = let ncs = renCols n cs
+                 in (rs, ncs)
+                where renCols name [] = []
+                      renCols name (c:cs') = if length (fst c) > 1
+                                             then c:renCols name cs'
+                                             else ([name], snd c):renCols name cs'
 
 ------------------------------- PRODUCTO CARTESIANO ----------- Hay que chequear tipos --------------
 concatColsRows :: ([Column], [Column]) -> ([TableRow],[TableRow]) -> ([Column],[TableRow])
@@ -109,15 +99,16 @@ concatColsRows (xs, ys) (rs , rs') = let colrows = map combineGroup grouped
                                          alignedRows = concatMap snd colrows
                                      in (cols, transpose alignedRows)
   where
-    combined = zip (xs ++ ys) (transpose (concatMap (\r -> map (uncurry (++). (r,)) rs') rs))
+    plain cs = concatMap (\c -> (map (\e -> ([e], snd c)) (fst c))) cs
+    combined = zip (plain xs ++ plain ys) (transpose (concatMap (\r -> map (uncurry (++). (r,)) rs') rs))
     sorted = sortBy (compare `on` (snd. fst)) combined
     grouped = groupBy ((==) `on` (snd. fst)) sorted -- Agrupamos por nombre de columna
     -- Para columnas con el mismo nombre, agrupamos segun tabla de origen: ([t1,t2], cname)
     combineGroup grp = ((concatMap (fst. fst) grp, (snd. fst) (head grp)), map snd grp)
 
 pcart :: Table -> Table -> Table -- aname y bname tienen que ser distintos
-pcart (arows, _, acols) (brows, _, bcols) = let (cols, rs) = concatColsRows (acols,bcols) (arows,brows)
-                                            in (rs, "X", cols)
+pcart (arows, acols) (brows, bcols) = let (cols, rs) = concatColsRows (acols,bcols) (arows,brows)
+                                      in (rs, cols)
 
 ------------------------------- DIFERENCIA  --------------------------------------------------------
 existRow :: [Column] -> TableRow -> [Column] -> [TableRow] -> Bool
@@ -145,15 +136,15 @@ removeRows acols (a:ars) bcols brs = if existRow acols a bcols brs
 
 
 difftables :: Table -> Table -> Table
-difftables (ars, _, acols) (brs, _, bcols) = let rs = removeRows acols ars bcols brs
-                                         in (rs , "difftables", acols)
+difftables (ars, acols) (brs, bcols) = let rs = removeRows acols ars bcols brs
+                                       in (rs , acols)
 
-------------------------------- UNION  ----------- Hay que chequear tipos --------------
+------------------------------- UNION  -----------------------------------------------------
 
 uni :: Table -> Table -> Table
-uni (arows, _, acols) (brows, _, _) = (nub (arows ++ brows), "uni", acols)
+uni (arows, acols) (brows, _) = (nub (arows ++ brows), acols)
 
-------------------------------- SELECCION  ----------- Hay que chequear tipos --------------
+------------------------------- SELECCION  -------------------------------------------------
 
 extractVal :: TableValue -> Either Int String
 extractVal (Numb i) = Left i
@@ -165,7 +156,7 @@ getVal (Col var) (r:rs) (c:cs) = if snd var == snd c
                                  then (if (length (fst c) == 1) || (head (fst c) == head (fst var))
                                        then Right r
                                        else getVal (Col var) rs ((tail (fst c), snd c):cs))
-                                 else getVal (Col var) rs cs
+                                 else getVal (Col var) (drop (length (fst c)) (r:rs)) cs
 getVal _ [] _ = Left False
 getVal _ _ [] = Left False
 
@@ -222,10 +213,10 @@ condition (Eq v1 v2) r cs = case getVal v1 r cs of
                                 _ -> False
 
 sel :: Table -> Condition -> Table
-sel ([], name, cols) _ = ([], name, cols)
-sel (r:rs, name, cols) cond = let (rs', _, _) = sel (rs, name, cols) cond
-                              in if condition cond r cols then (r:rs', "sleccion", cols)
-                                           else (rs', "sel", cols)
+sel ([], cols) _ = ([], cols)
+sel (r:rs, cols) cond = let (rs', _) = sel (rs, cols) cond
+                        in if condition cond r cols then (r:rs', cols)
+                           else (rs', cols)
 
 ------------------------------- PROYECCION ---------------------------------------------
 -- Devuelve los elementos de la fila correspondiente a las columnas
@@ -259,8 +250,8 @@ sortCols cs ts@(tc:tcols) = let scols = sortOn (\x -> fromMaybe (length ts) (ele
                                                         else sortCols' (c:cols) ts'
 
 proy :: [Column] -> Table -> Table
-proy [] (_, tname, _) = ([], tname, [])
-proy cols (trows, _, tcols) = let sortedCols = sortCols cols tcols
-                                  trows' = cutCols (trows, tcols) sortedCols
-                              in (trows', "proy", sortedCols)
+proy [] _ = ([], [])
+proy cols (trows, tcols) = let sortedCols = sortCols cols tcols
+                               trows' = cutCols (trows, tcols) sortedCols
+                           in (trows', sortedCols)
 ---------------------------------------------------------

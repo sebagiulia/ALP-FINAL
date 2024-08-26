@@ -245,7 +245,10 @@ parseIO f p x = lift $ case p x of
 
 handleStmt :: State -> Stmt TableTerm -> InputT IO State
 handleStmt state stmt = lift $ do
-  _ <- when (not (inter state)) $ do putStrLn $ "> Query " ++ show ((nq state) + 1)  ++ "." 
+  let  q = case stmt of
+            Text _ -> False
+            _      -> True
+  _ <- when (not (inter state) && q) $ do putStrLn $ "> Query " ++ show ((nq state) + 1)  ++ "." 
   st <- case stmt of
     ImportDB d     -> checkImportDB d 
     ImportCSV f v  -> checkImportCSV f v
@@ -258,6 +261,7 @@ handleStmt state stmt = lift $ do
     DropTable v    -> checkDropTable v
     DropOp v       -> checkDropOp v
     Operator v a e -> checkEvalOp v a e
+    Text str       -> putStrLn ("> T: " ++ str) >> return state
   if (not (inter st)) then return st { nq = (nq st) + 1 }
                          else return st
  where
@@ -337,9 +341,9 @@ handleStmt state stmt = lift $ do
                       Left err -> error err >> return state
                       Right st -> msg ("Operador " ++ v ++ " eliminado.") >> return (state { ov = st })
   checkEvalOp v a e = do
-                  case evalOperator (ov state) v a e of
-                    Left err -> error err >> return state
-                    Right st -> msg ("Operador " ++ v ++ " cargado.") >> return (state { ov = st})
+                  case evalOperator (ov state) (lv state) v a e of
+                    Left err -> error err >> return (state { lv = [] })
+                    Right st -> msg ("Operador " ++ v ++ " cargado.") >> return (state { ov = st, lv = []})
 
 prelude :: String
 prelude = "Ejemplos/Prelude.arsql"

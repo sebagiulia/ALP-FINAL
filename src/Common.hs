@@ -91,6 +91,7 @@ data Stmt i = Table String i           --  Declarar un nuevo identificador x, de
             | DropTable String
             | DropOp String
             | Operator String OperatorArgs i
+            | Text String
   deriving (Show)
 
 instance Functor Stmt where
@@ -103,3 +104,4 @@ instance Functor Stmt where
   fmap f (DropTable v) = DropTable v
   fmap f (DropOp v) = DropOp v
   fmap f (Operator v a i)  = Operator v a (f i)
+  fmap f (Text s) = Text s

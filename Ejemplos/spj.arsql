@@ -1,0 +1,17 @@
+T[ "Obtener los numeros de los proveedores que suministran partes al proyecto J1" ]
+P[S](S[J="J1"](SPJ))
+
+T["Obtener todos los envios en los cuales la cantidad esta en el intervalo de 300 a 750 inclusive."]
+S[Cantidad>=300 & Cantidad <= 750](SPJ)
+
+operator cpnat = (t1|t2|t3)=> P[S|P|J](t1 * t2 * t3) - P[S|P|J](t1 |*| t2 |*| t3)
+T["Obtener todas las 3-uplas numero de proveedor/numero de parte/numero de poryecto tales que 
+   el proveedor, la parte y el proyecto indicados no esten todos cosituados."]
+cpnat[S|P|J]
+drop operator cpnat
+
+T["Obtener los numeros de las partes suministradas por un proveedor de Londres a un proyecto en Londres."]
+P[P](S[Ciudad="Londres"](SPJ |*| S |*| J))
+
+T["Obtener todos los pares de números de proveedor tales que los dos proveedores en cuestion esten cosituados."]
+P[S.S|S2.S](S[S.Ciudad=S2.Ciudad](S * R[S2](S)))

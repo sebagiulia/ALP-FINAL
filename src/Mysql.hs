@@ -46,14 +46,14 @@ getColumns :: [ColumnDef] -> TableName -> [Column]
 getColumns c  n = [show2 (columnName x) | x <- c ]
                 where show2 w = ([n] , init (tail (show w)))
 
-getTables :: MySQLConn -> [[MySQLValue]] -> IO [(Table, [ColumnDef])] -- > [(table, tname, cnames)]
+getTables :: MySQLConn -> [[MySQLValue]] -> IO [((TableName, Table), [ColumnDef])] -- > [(table, tname, cnames)]
 getTables _ [] = return []
 getTables conn (l:ls) = do let tableName = getName (head l)
                            (cdef, is) <- query_ conn (fromString ("select * from " ++ tableName))
                            table <- traduce is
                            let table' = convertToTableValues table
                            tables <- getTables conn ls
-                           return (((table', tableName, getColumns cdef tableName), cdef):tables)
+                           return (((tableName, (table', getColumns cdef tableName)), cdef):tables)
                         where getName (MySQLText t) = T.unpack t
                               getName _             = "invalid"
 
@@ -68,13 +68,13 @@ mysqlconn inf e = do conn <- connect inf
                                      return st
                       Left err -> throw $ Error $ "Variable existente: " ++ err
         where repeated (Left err) _ = Left err
-              repeated (Right tbs) t@((_,n,_),_) = case lookup n e of
+              repeated (Right tbs) t@((n,_),_) = case lookup n e of
                                                     Nothing -> Right $ t:tbs
                                                     _       -> Left n
 
-convertToEnv ::  NameEnv Table TableType -> [(Table, [ColumnDef])] -> NameEnv Table TableType
+convertToEnv ::  NameEnv Table TableType -> [((TableName, Table), [ColumnDef])] -> NameEnv Table TableType
 convertToEnv e [] = e
-convertToEnv e ((t@(rows, name, cols), cts):ts) = case lookup name e of
+convertToEnv e (((name,t@(rows, cols)), cts):ts) = case lookup name e of
                                         Just _ -> convertToEnv e ts
                                         Nothing -> let typ = (name, getType cts cols)
                                                    in ((name, (t, typ)):convertToEnv e ts)
