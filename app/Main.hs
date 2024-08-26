@@ -41,20 +41,18 @@ ioExceptionCatcher :: IOException -> IO (Maybe a)
 ioExceptionCatcher _ = return Nothing
 
 data State = S
-  { inter :: Bool
-  ,       -- True, si estamos en modo interactivo.
-    lfile :: String
-  , nq    :: Int -- Numero de queries.
-  ,     -- Ultimo archivo cargado (para hacer "reload")
-    gv    :: GlobalE  -- Entorno con tablas globales y su valor  [(TableName, (Value, Type))]
-  , lv    :: LocalE -- Entorno con tablas locales y su valor [(TableName, (Value, Type))]
-  , ov    :: OperE -- Entorno con operadores [(OperatorName, Term)]
+  {  inter :: Bool      -- True, si estamos en modo interactivo.
+    ,lfile :: String -- Ultimo archivo cargado (para hacer "reload")
+    ,nq    :: Int -- Numero de queries.
+    ,gv    :: GlobalE  -- Entorno con tablas globales y su valor  [(TableName, (Value, Type))]
+    ,lv    :: LocalE -- Entorno con tablas locales y su valor [(TableName, (Value, Type))]
+    ,ov    :: OperE -- Entorno con operadores [(OperatorName, Term)]
   }
 
 iprompt :: State -> String
 iprompt st = "GV:" ++ show (length (gv st)) ++ "|LV:" ++ show (length (lv st)) ++ "|OV:" ++ show (length (ov st)) ++  "|> "
 
---  read-eval-print loop
+--read-eval-print loop
 readevalprint :: [String] -> State -> InputT IO ()
 readevalprint args state@(S inter lfile nq gv lv ov) =
   let rec st = do
@@ -302,11 +300,7 @@ handleStmt state stmt = lift $ do
     then if (elem i (map fst (lv state)))
          then return (state { lv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (lv state)})
          else return (state { lv = (i,(v,ty)) : lv state })
-    else if (i /= it) 
-         then if (elem i (map fst (gv state)))
-              then return (state { gv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (gv state), lv = [] })
-              else return (state { gv = (i,(v,ty)) : gv state, lv = [] })
-         else return (state {lv = []})
+    else return (state {lv = []})
   checkImportDB d = do
     case getDBData d of
       Left  err -> error err >> return state
