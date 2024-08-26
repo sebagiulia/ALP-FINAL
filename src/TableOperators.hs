@@ -165,7 +165,7 @@ getNumber (Left i) = Right i
 getNumber _ = Left False
 
 
--- cond: = > < val or variable
+-- cond: = > < val or col
 condition :: Condition -> TableRow -> [Column] -> Bool
 condition Empty _ _ = True
 condition (And c1 c2) r cs = (condition c1 r cs) && (condition c2 r cs)

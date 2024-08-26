@@ -93,18 +93,18 @@ conversion' l (LUni t1 t2) = Uni (conversion' l t1) (conversion' l t2)
 conversion' l (LInt t1 t2) = Int (conversion' l t1) (conversion' l t2)
 conversion' l (LApp op args) = App op args
 
-evalInferDef :: TableName -> NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Either String (Table, TableType)
+evalInferDef :: TableName -> GlobalE -> LocalE -> OperE -> Term -> Either String (Table, TableType)
 evalInferDef n g l o t = case infer g l o (Ren n t) of
                            Left err  -> Left err
                            Right typ -> let (rs, cs) = eval g l o (Ren n t)
                                         in Right ((nub rs, cs), typ)   
 
 -- evaluador de términos
-eval :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Table
+eval :: GlobalE -> LocalE -> OperE -> Term -> Table
 eval g l o t = let (rs, cs) = eval' [] g l o t
                in (nub rs, cs)
 
-eval' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType ->  [(String, Term)] -> Term -> Table
+eval' :: [(Table, TableType)] -> GlobalE -> LocalE -> OperE -> Term -> Table
 eval' _ e l o (GlobalTableVar v) = fst $ fromJust $ lookup v e
 eval' _ e l o (LocalTableVar i) =  fst $ fromJust $ lookup i l
 eval' a e l o (Sel cond t) = sel (eval' a e l o t) cond
@@ -125,16 +125,16 @@ eval' a g l o (App op args) = case lookup op o of
                             where existargs _ (Left err) = Left err
                                   existargs a (Right ags') = if isUpper (head a)
                                     then case lookup a g of
-                                           Nothing -> Left $ "No se encuentra variable global " ++ a ++ "."
+                                           Nothing -> Left $ "No se encuentra tabla global " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
                                     else case lookup a l of
-                                           Nothing -> Left $ "No se encuentra variable local " ++ a ++ "."
+                                           Nothing -> Left $ "No se encuentra tabla local " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
 
 conversionOperator :: [TableName] -> TableTerm -> Term
 conversionOperator args t = conversion' (zip args [0..]) t
 
-checkArgs :: OperatorArgs -> NameEnv Table TableType -> Either String OperatorArgs
+checkArgs :: OperatorArgs -> LocalE -> Either String OperatorArgs
 checkArgs args local = if foldr (\a g -> (isUpper . head) a || g) False args
                        then Left "Argumentos invalidos, deben iniciar con minuscula."
                        else case foldr f (Right args) args of
@@ -142,11 +142,11 @@ checkArgs args local = if foldr (\a g -> (isUpper . head) a || g) False args
                               Right _  -> Right args
                       where f s (Left err) = Left err
                             f s _          = case lookup s local of
-                                                Just _ -> Left $ "Variable local existente: " ++ s 
+                                                Just _ -> Left $ "Tabla local existente: " ++ s 
                                                 _ -> Right args
                             
 
-evalOperator :: [(String, Term)] -> NameEnv Table TableType  -> String -> OperatorArgs -> TableTerm -> Either String [(String, Term)]
+evalOperator :: OperE -> LocalE  -> String -> OperatorArgs -> TableTerm -> Either String [(String, Term)]
 evalOperator ops local v args t = case lookup v ops of
                               Just _ -> Left "Opeador existente."
                               Nothing -> case checkArgs args local of
@@ -155,16 +155,16 @@ evalOperator ops local v args t = case lookup v ops of
 
 
 
-evalImportDB :: ConnectInfo -> NameEnv Table TableType -> IO (Either SomeException (NameEnv Table TableType))
+evalImportDB :: ConnectInfo -> GlobalE -> IO (Either SomeException GlobalE)
 evalImportDB cinfo e = try (mysqlconn cinfo e)
 
-evalExportCSV :: String -> String -> NameEnv Table TableType -> IO (Either SomeException String)
+evalExportCSV :: String -> String -> GlobalE -> IO (Either SomeException String)
 evalExportCSV v f s = do
             fileExists <- try $ doesFileExist f
             case fileExists of
               Right bool -> if bool then return $ Left $ toException $ Error  "Archivo existente en exports/."
                             else  case lookup v s of
-                                   Nothing -> return $ Left $ toException $ Error  "Variable inexistente." --No deberia entrar
+                                   Nothing -> return $ Left $ toException $ Error  "Tabla inexistente." --No deberia entrar
                                    Just (t,_)  -> let tablecsv = tableToCsv t
                                                   in do result <- try (writeFile f tablecsv) :: IO (Either IOError ())
                                                         case result of
@@ -172,7 +172,7 @@ evalExportCSV v f s = do
                                                             Right _  -> return $ Right "Archivo creado con exito."
               Left err -> return $ Left err
 
-evalImportCSV :: String -> String -> NameEnv Table TableType -> IO (Either SomeException (NameEnv Table TableType))
+evalImportCSV :: String -> String -> GlobalE -> IO (Either SomeException GlobalE)
 evalImportCSV file name st = do
     csvData <- catch (BL.readFile file) ((\e -> return "") :: IOException -> IO BL.ByteString )
     if csvData == "" then return $ Left $ toException $ Error $ "No se pudo abrir el archivo: " ++ file ++ "."
@@ -180,36 +180,36 @@ evalImportCSV file name st = do
            Right st' -> return $ Right st'
            Left err  -> return $ Left $ toException $ Error err
 
-evalDropTable:: NameEnv Table TableType -> String -> Either String (NameEnv Table TableType)
+evalDropTable:: GlobalE -> String -> Either String GlobalE
 evalDropTable s v = case lookup v s of
-                 Nothing -> Left "Variable inexistente."
+                 Nothing -> Left "Tabla inexistente."
                  Just _ -> Right $ filter (\(k,val) -> k /= v) s
 evalDropOp:: [(String, Term)] -> String -> Either String [(String, Term)]
 evalDropOp s v = case lookup v s of
                  Nothing -> Left "Operador inexistente."
                  Just _ -> Right $ filter (\(k,val) -> k /= v) s
 
-checkNameFileImport :: NameEnv Table TableType -> String -> String -> Either String String
+checkNameFileImport :: GlobalE -> String -> String -> Either String String
 checkNameFileImport s file name = let (nf, ext) = separeAtDot file
                         in if null nf || ext /= "csv" then Left "No se trata de un archivo csv."
-                           else if not (isUpper (head name)) then Left "Nombre de variable invalido."
+                           else if not (isUpper (head name)) then Left "Nombre de tabla invalido."
                            else case lookup name s of
                                   Nothing -> Right $ file
-                                  _       -> Left $ "Variable existente: " ++ name ++ "."
+                                  _       -> Left $ "Tabla existente: " ++ name ++ "."
 
-checkNameFileExport :: NameEnv Table TableType -> String -> String -> Either String String
+checkNameFileExport :: GlobalE -> String -> String -> Either String String
 checkNameFileExport s v f = if not (isUpper (head v))
                             then Left "Solo las variables globales son exportables."
                             else
                               case lookup v s of
-                               Nothing -> Left "Variable inexistente."
+                               Nothing -> Left "Tabla inexistente."
                                _       -> let (ext, n) = break (=='.') (reverse f)
                                           in if ext /= "vsc" then Left "Falta extension csv en archivo."
                                              else if n == "" then Left "Nombre de archivo invalido."
                                                   else Right $ "exports/" ++ f
 
 -- type checker
-infer :: NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Either String TableType
+infer :: GlobalE -> LocalE -> OperE -> Term -> Either String TableType
 infer = infer' []
 -- definiciones auxiliares
 ret :: TableType -> Either String TableType
@@ -254,7 +254,7 @@ notfunError t1 = err $ render (printType t1) ++ " no puede ser aplicado."
 notfoundError :: TableName -> Either String TableType
 notfoundError n = err $ show n ++ " no está definida."
 
-infer' :: [(Table, TableType)] -> NameEnv Table TableType -> NameEnv Table TableType -> [(String, Term)] -> Term -> Either String TableType
+infer' :: [(Table, TableType)] -> GlobalE -> LocalE -> OperE -> Term -> Either String TableType
 infer' _ _ l _ (LocalTableVar n) = case lookup n l of
                                    Just (_, t) -> ret t
                                    _           -> notfoundError n
@@ -333,10 +333,10 @@ infer' c g l ops (App op args) = case lookup op ops of
                             where existargs _ (Left err) = Left err
                                   existargs a (Right ags') = if isUpper (head a)
                                     then case lookup a g of
-                                           Nothing -> Left $ "No se encuentra variable global " ++ a ++ "."
+                                           Nothing -> Left $ "No se encuentra tabla global " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
                                     else case lookup a l of
-                                           Nothing -> Left $ "No se encuentra variable local " ++ a ++ "."
+                                           Nothing -> Left $ "No se encuentra tabla local " ++ a ++ "."
                                            Just tt -> Right $ tt:ags'
 
 proyInfer :: [Column] -> TableType -> Either String TableType

@@ -1,4 +1,0 @@
-<>- Achicar state para que sea mas lejible                                                                               -<>
-<>- Terminar de corregir el Main                                                                                         -<>
-<>- Comentar el codigo                                                                                                   -<>
-<>- Limpiar el codigo                                                                                                    -<>

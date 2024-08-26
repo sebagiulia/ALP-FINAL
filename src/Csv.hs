@@ -16,7 +16,7 @@ tableToCsv (rows, cols) = let tcols = intercalate "," (map snd cols)
                               trows = map (intercalate "," . map tableValueToString) rows
                           in intercalate "\r\n" (tcols:trows)
 
-csvToTable :: TableName -> B.ByteString -> Either String (NameEnv Table TableType)
+csvToTable :: TableName -> B.ByteString -> Either String GlobalE
 csvToTable name csvData = case decode NoHeader csvData of
                         Right rows -> if V.null rows ||V.null (V.tail rows)
                                       then Left "Tabla vacía."

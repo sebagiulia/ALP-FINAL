@@ -58,7 +58,7 @@ getTables conn (l:ls) = do let tableName = getName (head l)
                               getName _             = "invalid"
 
 
-mysqlconn :: ConnectInfo -> NameEnv Table TableType -> IO (NameEnv Table TableType)
+mysqlconn :: ConnectInfo -> GlobalE -> IO GlobalE
 mysqlconn inf e = do conn <- connect inf
                      (_, is) <- query_ conn (fromString "show tables")
                      rows <- traduce is
@@ -66,13 +66,13 @@ mysqlconn inf e = do conn <- connect inf
                      case foldl repeated (Right []) tables of
                       Right ts -> do let st = convertToEnv e ts
                                      return st
-                      Left err -> throw $ Error $ "Variable existente: " ++ err
+                      Left err -> throw $ Error $ "Tabla existente: " ++ err
         where repeated (Left err) _ = Left err
               repeated (Right tbs) t@((n,_),_) = case lookup n e of
                                                     Nothing -> Right $ t:tbs
                                                     _       -> Left n
 
-convertToEnv ::  NameEnv Table TableType -> [((TableName, Table), [ColumnDef])] -> NameEnv Table TableType
+convertToEnv ::  GlobalE -> [((TableName, Table), [ColumnDef])] -> GlobalE
 convertToEnv e [] = e
 convertToEnv e (((name,t@(rows, cols)), cts):ts) = case lookup name e of
                                         Just _ -> convertToEnv e ts

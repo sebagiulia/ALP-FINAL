@@ -35,7 +35,7 @@ main' = do
   readevalprint args (S True "" 0 [] [] [])
 
 iname :: String
-iname = "cálculo lambda simplemente tipado"
+iname = "AR-SQL: Consultas en algebra relacional."
 
 ioExceptionCatcher :: IOException -> IO (Maybe a)
 ioExceptionCatcher _ = return Nothing
@@ -44,15 +44,15 @@ data State = S
   { inter :: Bool
   ,       -- True, si estamos en modo interactivo.
     lfile :: String
-  , nq :: Int -- Numero de queries.
+  , nq    :: Int -- Numero de queries.
   ,     -- Ultimo archivo cargado (para hacer "reload")
-    gv    :: NameEnv Table TableType  -- Entorno con variables globales y su valor  [(Name, (Value, Type))]
-  , lv    :: NameEnv Table TableType -- Entorno con variables locales y su valor [(Name, (Value, Type))]
-  , ov    :: [(String, Term)]
+    gv    :: GlobalE  -- Entorno con tablas globales y su valor  [(TableName, (Value, Type))]
+  , lv    :: LocalE -- Entorno con tablas locales y su valor [(TableName, (Value, Type))]
+  , ov    :: OperE -- Entorno con operadores [(OperatorName, Term)]
   }
 
 iprompt :: State -> String
-iprompt st = "GV:" ++ show (length (gv st)) ++ "|LV:" ++ show (length (lv st)) ++ "|OV:" ++ show (length (ov st)) ++  "> "
+iprompt st = "GV:" ++ show (length (gv st)) ++ "|LV:" ++ show (length (lv st)) ++ "|OV:" ++ show (length (ov st)) ++  "|> "
 
 --  read-eval-print loop
 readevalprint :: [String] -> State -> InputT IO ()
@@ -82,7 +82,7 @@ readevalprint args state@(S inter lfile nq gv lv ov) =
 data Command = Compile CompileForm
               | Print String
               | Recompile
-              | Browse
+              | Ls
               | Quit
               | Help
               | Noop
@@ -120,7 +120,7 @@ handleCommand state@(S inter lfile nq gv lv ov) cmd = case cmd of
   Quit   -> lift $ when (not inter) (putStrLn "!@#$^&*") >> return Nothing
   Noop   -> return (Just state)
   Help   -> lift $ putStr (helpTxt commands) >> return (Just state)
-  Browse -> lift $ do
+  Ls -> lift $ do
     when (length gv > 0) $ do {
       putStrLn "Global variables:";
       putStr (unlines [ s | s <- reverse (nub (map (\v -> (' ':fst v)) gv)) ]) }
@@ -156,12 +156,12 @@ data InteractiveCommand = Cmd [String] String (String -> Command) String
 
 commands :: [InteractiveCommand]
 commands =
-  [ Cmd [":browse"] "" (const Browse) "Ver los nombres en scope"
+  [ Cmd [":ls"] "" (const Ls) "Ver los nombres en scope"
   , Cmd [":load"]
         "<file>"
         (Compile . CompileFile)
         "Cargar un programa desde un archivo"
-  , Cmd [":print"] "<exp>" Print "Imprime un término y sus ASTs"
+  , Cmd [":print"] "<exp>" Print "Imprime un término de tabla y sus ASTs"
   , Cmd [":reload"]
         "<file>"
         (const Recompile)
@@ -175,8 +175,16 @@ helpTxt :: [InteractiveCommand] -> String
 helpTxt cs =
   "Lista de comandos:  Cualquier comando puede ser abreviado a :c donde\n"
     ++ "c es el primer caracter del nombre completo.\n\n"
-    ++ "<expr>                  evaluar la expresión\n"
-    ++ "def <var> = <expr>      definir una variable\n"
+    ++ "<expr>                             evaluar la expresión\n"
+    ++ "table <var> = <expr>               definir una tabla global\n"
+    ++ "import csv <file> as <var>         importar una tabla en formato csv \n"
+    ++ "import database [ <conndata> ]     importar un dataset completo desde un DBMS MySQL \n"
+    ++ "export csv <var> as <file>         exportar una tabla en formato csv sobre la carpeta exports/\n"
+    ++ "drop table <var>                   eliminar una tabla global\n"
+    ++ "drop operator <var>                eliminar un operador\n"
+    ++ "T [\"<text>\"]                       imprimir texto\n"
+    ++ "<var> -> <expr>                    definir una tabla local\n"
+    ++ "operator <var> = (<args>)=> <expr> definir un operador\n"
     ++ unlines
          (map
            (\(Cmd c a _ d) ->
@@ -255,7 +263,7 @@ handleStmt state stmt = lift $ do
     ExportCSV v f  -> checkExportCSV v f
     Table x e      -> checkDefTable x (conversion e)
     Assign x e     -> if isUpper (head x) 
-                      then error "Nombre de variable invalido, debe comenzar en minusculas." >> return state
+                      then error "Nombre de tabla invalido, debe comenzar en minusculas." >> return state
                       else checkType x (conversion e) 1
     Eval e         -> checkType it (conversion e) 0
     DropTable v    -> checkDropTable v
@@ -267,7 +275,7 @@ handleStmt state stmt = lift $ do
  where
   checkDefTable i t = do
     if not (isUpper (head i))
-    then error "Nombre de variable invalido, el primer caracter debe ser en mayusculas" >> return state
+    then error "Nombre de tabla invalido, el primer caracter debe ser en mayusculas" >> return state
     else case infer (gv state) (lv state) (ov state) t of
           Left  err -> typeError err >> return state
           Right ty  -> do
@@ -276,7 +284,7 @@ handleStmt state stmt = lift $ do
               Left err -> typeError err >> return state
               Right (v, ty) -> 
                   if (elem i (map fst (gv state)))
-                  then do msg ("Variable " ++ i ++ " actualizada.")
+                  then do msg ("Tabla " ++ i ++ " actualizada.")
                           return (state { gv = map (\(k,va) -> if k == i then (k, (v,ty)) else (k,va)) (gv state), lv = [] })
                   else do putStrLn i   
                           return (state { gv = (i,(v,ty)) : gv state, lv = [] })
@@ -335,7 +343,7 @@ handleStmt state stmt = lift $ do
   checkDropTable v = do
                   case evalDropTable (gv state) v of
                       Left err -> error err >> return state
-                      Right st -> msg ("Variable " ++ v ++ " eliminada.") >> return (state { gv = st })
+                      Right st -> msg ("Tabla " ++ v ++ " eliminada.") >> return (state { gv = st })
   checkDropOp v = do
                   case evalDropOp (ov state) v of
                       Left err -> error err >> return state

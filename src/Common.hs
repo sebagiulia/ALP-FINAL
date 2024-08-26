@@ -7,6 +7,7 @@ data Type = StrT
           | IntT
           deriving (Show, Eq)
 type TableType = (TableName, [(Column, Type)])
+type OperatorName = String
 data ConnectionType = T { 
                           host :: String,
                           db :: String,
@@ -18,7 +19,9 @@ data ConnectionType = T {
 type Context = [TableType]
 
 -- Entornos
-type NameEnv table ty = [(TableName, (table, ty))]
+type GlobalE = [(TableName, (Table, TableType))] -- Tablas globales
+type LocalE = [(TableName, (Table, TableType))] -- Tablas locales
+type OperE = [(OperatorName, Term)] -- Operadores
 
 data ConnWord = LHost TableAtom 
               | LDb TableAtom
