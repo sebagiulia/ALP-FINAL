@@ -306,13 +306,13 @@ infer' c e l o (Ren n t) = case infer' c e l o t of
                             err -> err
 infer' c e l o (PCart t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
-                             Right (n1, t1cs) -> case infer' c e l o t2 of
+                             Right a@(n1,_) -> case infer' c e l o t2 of
                                                   Left e  -> err e
-                                                  Right (n2, t2cs) ->  if n1 == n2
+                                                  Right b@(n2,_) ->  if n1 == n2
                                                                        then nameError n1
-                                                                       else case concatColsTyp t1cs t2cs of
-                                                                              Right ts -> ret (n1 ++ "*" ++ n2, ts)
-                                                                              Left err -> coltypeError err
+                                                                       else case concatColsTyp a b of
+                                                                              Right ty -> ret ty
+                                                                              Left err -> Left err
 infer' c e l o (PNat t1 t2) = case infer' c e l o (PCart t1 t2) of
                             Left e -> Left e
                             _ -> case infer' c e l o t1 of
@@ -321,7 +321,7 @@ infer' c e l o (PNat t1 t2) = case infer' c e l o (PCart t1 t2) of
                                                           Left e  -> err e
                                                           Right (n2, t2cs) -> case matchCols (n1, t1cs) (n2, t2cs) of
                                                                                   Right t -> ret t
-                                                                                  Left err -> coltypeError err
+                                                                                  Left err -> Left err
 infer' c e l o (Uni t1 t2) = case infer' c e l o t1 of
                              Left e  -> err e
                              Right (n1, t1cs) -> case infer' c e l o t2 of
@@ -386,24 +386,26 @@ proyInfer (c:cs) (n, ts) = case lookup (snd c) (map (\((x,y),z) -> (y,(x,z))) ts
 
 
 -- concatena tipos en base a sus columnas
-concatColsTyp :: [(Column, Type)] -> [(Column, Type)] -> Either (Column, Type) [(Column, Type)] -- -> [(([tab1,tab2,...], col), type)] = tab1.col, tab2.col, ...  
-concatColsTyp xs ys = foldr combineGroup (Right []) grouped
+concatColsTyp :: TableType -> TableType -> Either String TableType -- -> [(([tab1,tab2,...], col), type)] = tab1.col, tab2.col, ...  
+concatColsTyp (n1,xs) (n2, ys) = foldr combineGroup (Right ("", [])) grouped
   where 
     combined = xs ++ ys
     sorted = sortBy (compare `on` (snd . fst)) combined
     grouped = groupBy ((==) `on` (snd . fst)) sorted -- Agrupamos por nombre de columna
     -- Para columnas con el mismo nombre, agrupamos segun tabla de origen: ([t1,t2], cname)
-    combineGroup grp (Right cs) = if length (nub (map snd grp)) > 1
-                                  then Left (head grp)
-                                  else Right $ ((concatMap (fst. fst) grp, snd (fst (head grp))), snd (head grp)):cs
+    combineGroup grp (Right (n,cs)) = if length (nub (map snd grp)) > 1 then coltypeError (head grp)  
+                                      else let ot = concatMap (fst. fst) grp
+                                           in if length (nub ot) < length ot then Left "Columnas repetidas. Sugerencia: Renombrar tablas" 
+                                              else Right $ (n1 ++ "*" ++ n2, ((ot, snd (fst (head grp))), snd (head grp)):cs) 
+                                    
     combineGroup grp (Left err) = Left err
 
 
 -- devuelve el tipo de la nueva tabla como resultado de agrupar y combinar dos tipos distintos
-matchCols :: TableType -> TableType -> Either (Column, Type) TableType
+matchCols :: TableType -> TableType -> Either String TableType
 matchCols (n1, []) (n2, ts) = Right (n1 ++ "|*|" ++ n2, ts)
-matchCols (n1, t1) (n2, t2) = case concatColsTyp t1 t2 of
-                                Right ts -> Right (n1 ++ "|*|" ++ n2, map f ts)
+matchCols a@(n1,_) b@(n2,_) = case concatColsTyp a b of
+                                Right (_,ts) -> Right (n1 ++ "|*|" ++ n2, map f ts)
                                 Left err -> Left err
                                 where
                                 f ((tables, col), typ) = if length tables > 1
