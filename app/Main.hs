@@ -19,7 +19,8 @@ import           Text.PrettyPrint.HughesPJ      ( render
 import           TableOperators
 import           Common
 import           PrettyPrinter
-import           Simplytyped
+import           Eval
+import           TypeChecker
 import           Parse
 import           Error
 ---------------------

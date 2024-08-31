@@ -83,9 +83,9 @@ existRow _ _ [] _ = False
 existRow _ _ _ [] = False
 existRow acols a bcols (b:brs) = a == sortedb || existRow acols a bcols brs
                    where sortedb = concat sortedByTable
-                         sortedByTable = map (\(t,((t', _),r)) -> 
-                                              map snd (sortOn (\(z,_) -> 
-                                                               fromMaybe (length (fst t)) (elemIndex z (fst t))) 
+                         sortedByTable = map (\(t,((t', _),r)) ->
+                                              map snd (sortOn (\(z,_) ->
+                                                               fromMaybe (length (fst t)) (elemIndex z (fst t)))
                                                   (zip t' r)))
                                              (zip acols sortedByCol)
                          sortedByCol = sortOn (\x -> fromMaybe (length acols) (elemIndex (snd (fst x)) (map snd acols))) grouped
@@ -154,14 +154,14 @@ condition c r cs = case c of
   Lreq v1 v2 -> case numbers v1 v2 of
                 Right (n1, n2) -> n1 <= n2
                 _              -> False
-  where 
-    values va vb = 
+  where
+    values va vb =
       case getVal va r cs of
         Right a -> case getVal vb r cs of
                     Right b -> Right (extractVal a, extractVal b)
                     _ -> Left False
         _ -> Left False
-    numbers va vb = 
+    numbers va vb =
       case values va vb of
         Right (a, b) -> case getNumber a of
                           Right a' -> case getNumber b of
@@ -207,7 +207,7 @@ sortCols [] _ = []
 sortCols cs ts@(tc:tcols) = let scols = sortOn (\x -> fromMaybe (length ts) (elemIndex (snd x) (map snd ts))) cs
                             in sortCols' scols ts
                     where sortCols' _ [] = []
-                          sortCols' [] _ = [] 
+                          sortCols' [] _ = []
                           sortCols' (c:cols) (t':ts') = if snd c == snd t'
                                                         then if null (fst c)
                                                              then t':sortCols' cols ts'
@@ -235,7 +235,7 @@ concatColsRows (xs, ys) (rs , rs') = let colrows = map combineGroup grouped
                                      in (cols, transpose alignedRows)
   where
     -- aplanamos las columnas para alinearlas a las filas
-    plain cs = concatMap (\c -> (map (\e -> ([e], snd c)) (fst c))) cs 
+    plain = concatMap (\c -> map (\e -> ([e], snd c)) (fst c))
     -- alineamos cada columna a una lista que representa cada valor de la fila en la columa
     combined = zip (plain xs ++ plain ys) (transpose (concatMap (\r -> map (uncurry (++). (r,)) rs') rs))
     -- ordenamos las columnas junto con las filas en base al nombre de la columna
@@ -276,7 +276,7 @@ pnat t1 t2 = let t'@(_, cols') = pcart t1 t2
                  cond = prodNatCondition cols'
                  t = sel t' cond
                  -- reducimos a una tabla origen por columna.
-                 cols = map (\(ts, cn) -> ([head ts], cn)) cols' 
+                 cols = map (\(ts, cn) -> ([head ts], cn)) cols'
              in proy cols t
 
 

@@ -47,7 +47,8 @@ library:
   - TableOperators
   - Common
   - PrettyPrinter
-  - Simplytyped
+  - Eval
+  - TypeChecker
   - Parse 
   - Csv
   - Error

@@ -77,7 +77,7 @@ module Common where
   data TableAssign = LAssign TableName TableTerm
             deriving (Show)
 
-  -- TableTerm
+  -- TableTerm: AST de terminos con nombres
   data TableTerm = LSel TableCond TableTerm
                  | LProy TableCols TableTerm            
                  | LRen TableName TableTerm            
@@ -92,7 +92,7 @@ module Common where
             deriving (Show)
 
 
-  -- Terminos con variables globales, locales y ligadas
+  -- Term: AST de terminos con variables globales, locales y ligadas
   data Term = Sel Condition Term
             | Proy [Column] Term
             | Ren TableName Term
