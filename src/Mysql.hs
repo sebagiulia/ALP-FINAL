@@ -43,7 +43,7 @@ mySQLValueToTableValue (MySQLInt32 n) = Numb (fromIntegral n)
 mySQLValueToTableValue n = Str (show n) -- No deberia entrar
 
 
-getColumns :: [ColumnDef] -> TableName -> [Column]
+getColumns :: [ColumnDef] -> TableName -> [TableColumn]
 getColumns c  n = [show2 (columnName x) | x <- c ]
                 where show2 w = ([n] , init (tail (show w)))
 

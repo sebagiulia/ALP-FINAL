@@ -32,7 +32,6 @@ library
   default-extensions:
       TupleSections
       MultiWayIf
-      LambdaCase
       DataKinds
       PolyKinds
       FlexibleInstances
@@ -66,7 +65,6 @@ executable AR-SQL
   default-extensions:
       TupleSections
       MultiWayIf
-      LambdaCase
       DataKinds
       PolyKinds
       FlexibleInstances

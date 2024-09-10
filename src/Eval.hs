@@ -42,14 +42,14 @@ emptytable = ([], [])
 
 -- separeAtDot
 --  separacion de entrada de usuario de columna en (NombreTabla, NombreColumna) 
-separeAtDot :: String -> Column
+separeAtDot :: String -> TableColumn
 separeAtDot c = let (beforeDot, rest) = span (/= '.') c
                 in if null rest then ([], beforeDot)
                                 else ([beforeDot], drop 1 rest)
 
 -- columns 
 --  a partir de una serie de columnas, se agrupan segun su nombre y tablas de origen (TablasOrigen, NombreColumna)
-columns :: TableCols -> [Column]
+columns :: TableCols -> [TableColumn]
 columns [] = []
 columns ((LVar v):cs) = let cs' = columns cs
                             c' = separeAtDot v

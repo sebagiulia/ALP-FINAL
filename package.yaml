@@ -34,7 +34,6 @@ dependencies:
 default-extensions:
 - TupleSections
 - MultiWayIf
-- LambdaCase
 - DataKinds
 - PolyKinds
 - FlexibleInstances

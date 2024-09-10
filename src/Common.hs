@@ -50,7 +50,7 @@ module Common where
             deriving (Show, Eq)
 
   -- Tipo de las tablas
-  type TableType = (TableName, [(Column, Type)])
+  type TableType = (TableName, [(TableColumn, Type)])
 
   -- Entornos
   type GlobalE = [(TableName, (Table, TableType))] -- Tablas globales
@@ -94,7 +94,7 @@ module Common where
 
   -- Term: AST de terminos con variables globales, locales y ligadas
   data Term = Sel Condition Term
-            | Proy [Column] Term
+            | Proy [TableColumn] Term
             | Ren TableName Term
             | PNat Term Term
             | PCart Term Term

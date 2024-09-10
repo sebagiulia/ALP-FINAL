@@ -29,7 +29,7 @@ nameError :: TableName -> Either String TableType
 nameError n =
   err $  "Se esperaban nombres de tablas distintos: " ++ n
 
-coltypeError :: (Column, Type) -> Either String TableType
+coltypeError :: (TableColumn, Type) -> Either String TableType
 coltypeError (c,_) =
   err $  "Columnas con mismo nombre pero distinto tipo: " ++ snd c ++ "."
 
@@ -130,7 +130,7 @@ infer' c g l ops (App op args) = case lookup op ops of
                                            Just tt -> Right $ tt:ags'
 
 -- infiere el tipo de una tabla segun la proyeccion de ciertas columnas
-proyInfer :: [Column] -> TableType -> Either String TableType
+proyInfer :: [TableColumn] -> TableType -> Either String TableType
 proyInfer [] (n,_) = Right (n, [])
 proyInfer _ (n, []) = Right (n, [])
 proyInfer (c:cs) (n, ts) = case lookup (snd c) (map (\((x,y),z) -> (y,(x,z))) ts) of

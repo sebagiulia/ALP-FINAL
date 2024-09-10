@@ -19,15 +19,15 @@ type TableRow = [TableValue]
 -- Notar que pueden haber columnas con mismo nombre pero
 -- representando tablas diferentes.
 type ColumnName = String
-type Column = ([TableName],ColumnName)
+type TableColumn = ([TableName],ColumnName)
 
 -- Tabla: (Filas, Columnas)
-type Table = ([TableRow],[Column])
+type Table = ([TableRow],[TableColumn])
 
 -- Representacion de valores ingresados por el usuario, 
 -- pueden representar valores directos o indirectos 
 -- mediante columnas.
-data Value = Col Column | Val TableValue
+data Value = Col TableColumn | Val TableValue
                deriving(Show)
 
 -- Arbol de condicion para para filtrar filas
@@ -76,7 +76,7 @@ ren (rs, cs) n = let ncs = renCols n cs
 -- existRow
 --  determina si una fila existe en un grupo de filas que pueden tener
 --  un orden distinto de columnas.
-existRow :: [Column] -> TableRow -> [Column] -> [TableRow] -> Bool
+existRow :: [TableColumn] -> TableRow -> [TableColumn] -> [TableRow] -> Bool
 existRow [] _ _ _ = False
 existRow _ [] _ _ = False
 existRow _ _ [] _ = False
@@ -96,7 +96,7 @@ existRow acols a bcols (b:brs) = a == sortedb || existRow acols a bcols brs
 -- removeRows _ a _ b
 --  remueve un grupo de filas b de otro grupo de filas a que pueden tener un orden
 --  de columnas diferentes
-removeRows :: [Column] -> [TableRow] -> [Column] -> [TableRow] -> [TableRow]
+removeRows :: [TableColumn] -> [TableRow] -> [TableColumn] -> [TableRow] -> [TableRow]
 removeRows acols [] bcols b = []
 removeRows acols (a:ars) bcols brs = if existRow acols a bcols brs
                                      then removeRows acols ars bcols brs
@@ -114,7 +114,7 @@ difftables (ars, acols) (brs, bcols) = let rs = removeRows acols ars bcols brs
 -- getVal 
 --  obtiene el valor ingresado por el usuario, sea atomico o desde
 --  una columna, de no poder devuelve false.
-getVal :: Value -> TableRow -> [Column] -> Either Bool TableValue
+getVal :: Value -> TableRow -> [TableColumn] -> Either Bool TableValue
 getVal (Val s) _ _ = Right s
 getVal (Col var) (r:rs) (c:cs) = if snd var == snd c
                                  then (if (length (fst c) == 1) || (head (fst c) == head (fst var))
@@ -134,7 +134,7 @@ getNumber _ = Left False
 -- condition c row cols
 --  devuelve el resultado de aplicar la condicion c
 --  sobre una fila row ordenada en base a cols 
-condition :: Condition -> TableRow -> [Column] -> Bool
+condition :: Condition -> TableRow -> [TableColumn] -> Bool
 condition c r cs = case c of
   Empty      -> True
   And c1 c2  -> condition c1 r cs && condition c2 r cs
@@ -182,7 +182,7 @@ sel (r:rs, cols) cond = let (rs', _) = sel (rs, cols) cond
 
 -- cutRow
 --  devuelve los elementos de la fila correspondiente a las columnas
-cutRow :: TableRow -> [Column] -> [Column] -> TableRow
+cutRow :: TableRow -> [TableColumn] -> [TableColumn] -> TableRow
 cutRow (v:vs) ((tcs, tc):tcols) ((ts,c):cols) | null tcs = cutRow (v:vs) tcols ((ts, c):cols)
                                               | null ts = cutRow (v:vs) ((tcs, tc):tcols) cols
                                               | tc == c = if head tcs == head ts
@@ -193,7 +193,7 @@ cutRow _ _ _ = []
 
 -- cutRows (rows, tcols) cols
 --  devuelve las filas rows cortadas a partir de las columnas cols
-cutRows :: ([TableRow], [Column]) -> [Column] -> [TableRow]
+cutRows :: ([TableRow], [TableColumn]) -> [TableColumn] -> [TableRow]
 cutRows ([], _) _ = []
 cutRows (r:rows, tcols) cols = let r' = cutRow r tcols cols
                                    rows' = cutRows (rows, tcols) cols
@@ -201,7 +201,7 @@ cutRows (r:rows, tcols) cols = let r' = cutRow r tcols cols
 
 -- sortCols c1 c2 
 --  ordena las columnas c1 segun como aparecen en c2.
-sortCols :: [Column] -> [Column] -> [Column]
+sortCols :: [TableColumn] -> [TableColumn] -> [TableColumn]
 sortCols _ [] = []
 sortCols [] _ = []
 sortCols cs ts@(tc:tcols) = let scols = sortOn (\x -> fromMaybe (length ts) (elemIndex (snd x) (map snd ts))) cs
@@ -216,7 +216,7 @@ sortCols cs ts@(tc:tcols) = let scols = sortOn (\x -> fromMaybe (length ts) (ele
 
 -- proy cs t
 --  Proyeccion algebraica de la tabla t a partir de las columnas cs. 
-proy :: [Column] -> Table -> Table
+proy :: [TableColumn] -> Table -> Table
 proy [] _ = ([], [])
 proy cols (trows, tcols) = let sortedCols = sortCols cols tcols
                                trows' = cutRows (trows, tcols) sortedCols
@@ -228,7 +228,7 @@ proy cols (trows, tcols) = let sortedCols = sortCols cols tcols
 -- concatColsRows (c1, c2) (r1, r2)
 --  concatena todas las filas de r2 a cada fila de r1 y las ordena segun
 --  la union de las columnas.
-concatColsRows :: ([Column], [Column]) -> ([TableRow],[TableRow]) -> ([Column],[TableRow])
+concatColsRows :: ([TableColumn], [TableColumn]) -> ([TableRow],[TableRow]) -> ([TableColumn],[TableRow])
 concatColsRows (xs, ys) (rs , rs') = let colrows = map combineGroup grouped
                                          cols = map fst colrows -- extramos columnas
                                          alignedRows = concatMap snd colrows -- extraemos filas transpuestas
@@ -259,7 +259,7 @@ pcart (arows, acols) (brows, bcols) = let (cols, rs) = concatColsRows (acols,bco
 --  genera el arbol de condición para producto natural.
 --   para cada columna, se crea una igualdad circular entre
 --   todas sus tablas origen.
-prodNatCondition :: [Column] -> Condition
+prodNatCondition :: [TableColumn] -> Condition
 prodNatCondition [] = Empty
 prodNatCondition (c:cols) = if length (fst c) == 1
                             then prodNatCondition cols
@@ -284,7 +284,7 @@ pnat t1 t2 = let t'@(_, cols') = pcart t1 t2
 
 -- dropCols l1 l2:
 --  elimina las columnas en l2 de l1 (se presupone columnas ordenadas)
-dropCols :: [Column] -> [Column] -> [Column]
+dropCols :: [TableColumn] -> [TableColumn] -> [TableColumn]
 dropCols _ []  = []
 dropCols [] ts  = ts
 dropCols (c:cols) (t:tcols) = if snd c == snd t
@@ -295,7 +295,7 @@ dropCols (c:cols) (t:tcols) = if snd c == snd t
 
 -- removeCols l1 l2:
 --  elimina las columnas en l2 de l1 
-removeCols :: [Column] -> [Column] -> [Column]
+removeCols :: [TableColumn] -> [TableColumn] -> [TableColumn]
 removeCols [] b = []
 removeCols from rem = let torem = sortCols rem from
                       in filter (\(t,c) -> not (null t)) $ dropCols torem from
