@@ -14,10 +14,10 @@ import Control.Exception (SomeException, Exception, toException, catch, IOExcept
 
 -- Funciones para manejar la conexion de base de datos mysql y transferir los datos en el formato adecuado.
 
-getDBData :: ConnWords -> Either String ConnectInfo
+getDBData :: ConnInfo -> Either String ConnectInfo
 getDBData = getDBData' defaultConnectInfo
 
-getDBData' :: ConnectInfo -> ConnWords -> Either String ConnectInfo
+getDBData' :: ConnectInfo -> ConnInfo -> Either String ConnectInfo
 getDBData' c (w:ws) = case w of
                         LHost (LString s) -> getDBData' (c {ciHost = s}) ws
                         LPort (LNum n) -> getDBData' (c {ciPort = fromIntegral (read n :: W.Word16) }) ws

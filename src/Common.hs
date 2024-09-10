@@ -7,13 +7,13 @@ module Common where
   data TableAtom = LVar String | LNum String | LString String deriving(Show)
 
   -- Representacion de la informacion de conexion con DB 
-  data ConnWord = LHost TableAtom 
+  data ConnData = LHost TableAtom 
                 | LDb TableAtom
                 | LUser TableAtom 
                 | LPw TableAtom 
                 | LPort TableAtom
                 deriving(Show)
-  type ConnWords = [ConnWord]
+  type ConnInfo = [ConnData]
 
   -- Representacion de parametros de operadores
   type OperatorArgs = [String]
@@ -23,7 +23,7 @@ module Common where
   data Stmt i = Table String i           --  Declarar un nuevo identificador x, def x = e
               | Eval i                 --  Evaluar el término
               | Assign String i        --  Declarar un identificador temporal x, x -> t
-              | ImportDB ConnWords      --  Importar dataset desde una base de datos
+              | ImportDB ConnInfo      --  Importar dataset desde una base de datos
               | ImportCSV String String -- Importar una tabla desde un archivo csv
               | ExportCSV String String -- Exportar tabla a archivo csv
               | DropTable String        -- Eliminar una tabla de las tablas globales

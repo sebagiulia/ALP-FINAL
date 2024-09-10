@@ -7,8 +7,8 @@ import Data.Char
 }
 
 %monad { P } { thenP } { returnP }
-%name parseStmt Def
-%name parseStmts Defs
+%name parseStmt Comm
+%name parseStmts Comms
 %name term Exp
 
 %tokentype { Token }
@@ -68,16 +68,16 @@ import Data.Char
 
 %% 
 
-Def     :  Defexp                                { $1 }
-        |  Assign	                         { $1 }
-        | IMPORT CSV VAR AS VAR                  { ImportCSV $3 $5 }
-        | IMPORT DATABASE '[' ConnWords ']'      { ImportDB $4 }
-        | EXPORT CSV VAR AS VAR                  { ExportCSV $3 $5 }
-        | Drop                                   { $1 }
-        | TEXT '['STRING ']'                            { Text $3 }
-        | Exp	                                 { Eval $1 }
-        | OPERATOR VAR '=' '(' Args ')' '=>' Exp { Operator $2 $5 $8 }
-Defexp  :  TABLE VAR '=' Exp                       { Table $2 $4 }
+Comm     :  Defexp                                { $1 }
+         |  Assign	                         { $1 }
+         | IMPORT CSV VAR AS VAR                  { ImportCSV $3 $5 }
+         | IMPORT DATABASE '[' ConnInfo ']'      { ImportDB $4 }
+         | EXPORT CSV VAR AS VAR                  { ExportCSV $3 $5 }
+         | Drop                                   { $1 }
+         | TEXT '['STRING ']'                            { Text $3 }
+         | Exp	                                 { Eval $1 }
+         | OPERATOR VAR '=' '(' Args ')' '=>' Exp { Operator $2 $5 $8 }
+Defexp   :  TABLE VAR '=' Exp                       { Table $2 $4 }
 Assign : VAR '->' Exp                            { Assign $1 $3 }
              
 
@@ -85,8 +85,8 @@ Drop : DROP TABLE VAR    { DropTable $3 }
      | DROP OPERATOR VAR { DropOp $3 }
 
 Exp     :: { TableTerm }
-        : SEL '[' ExpCond ']' '(' Exp ')' { LSel $3 $6}
-        | PROY '[' Words ']' '(' Exp ')'  { LProy $3 $6}
+        : SEL '[' Cond ']' '(' Exp ')' { LSel $3 $6}
+        | PROY '[' Cols ']' '(' Exp ')'  { LProy $3 $6}
         | REN '[' VAR ']' '(' Exp ')'     { LRen $3 $6}
         | VAR                             { LTableVar $1 }
         | Exp '*' Exp                     { LPCart $1 $3 }
@@ -98,12 +98,12 @@ Exp     :: { TableTerm }
         | VAR '[' Args  ']'               { LApp $1 $3 }
         | '(' Exp ')'                     { $2 }
 
-ConnWords :: { ConnWords }
-          : ConnWord                 { [$1] }  
-          | ConnWord '|' ConnWords   { $1 : $3 }
+ConnInfo :: { ConnInfo }
+          : ConnData                 { [$1] }  
+          | ConnData '|' ConnInfo   { $1 : $3 }
 
 
-ConnWord :: { ConnWord }
+ConnData :: { ConnData }
          : HOST Atom    { LHost $2 }
          | DB Atom      { LDb $2   }
          | PORT Atom    { LPort $2 }
@@ -114,14 +114,14 @@ Args :: { OperatorArgs }
      : VAR                { [$1] }
      | VAR '|' Args       { $1 : $3 }
 
-Words :: { TableCols }
+Cols :: { TableCols }
       : Atom                           { [$1] }
-      | Atom '|' Words               { $1 : $3 }
+      | Atom '|' Cols               { $1 : $3 }
 
-ExpCond :: { TableCond }
+Cond :: { TableCond }
         : TermCond                { $1 }
-        | ExpCond '&' ExpCond     { LAnd $1 $3 }
-        | ExpCond '|' ExpCond     { LOr $1 $3 }
+        | Cond '&' Cond     { LAnd $1 $3 }
+        | Cond '|' Cond     { LOr $1 $3 }
 
 TermCond :: { TableCond }
         : Atom '=' Atom           { LEquals $1 $3 }
@@ -135,8 +135,8 @@ Atom :: { TableAtom }
      | STRING   { LString $1 }
      | VAR      { LVar $1 }
 
-Defs    : Def Defs                  { $1 : $2 }
-        |                              { [] }
+Comms    : Comm Comms                  { $1 : $2 }
+         |                              { [] }
 
 {
 
@@ -220,7 +220,7 @@ lexer cont s = case s of
                     ('\n':s)  ->  \line -> lexer cont s (line + 1)
                     (c:cs)
                           | isSpace c -> lexer cont cs
-                          | isDigit c -> lexNum (c:cs)
+                          | isDigit c -> lexNum False (c:cs)
                           | isAlpha c -> lexVar (c:cs)
                     ('"':cs) -> lexString cs
                     ('-':'-':cs) -> lexer cont $ dropWhile ((/=) '\n') cs
@@ -234,6 +234,8 @@ lexer cont s = case s of
                     (']':cs) -> cont TCloseB cs
                     ('|':'*':'|':cs) -> cont TPNat cs
                     ('*':cs) -> cont TPCart cs
+                    ('-':c:cs) -> if isDigit c then lexNum True (c:cs)
+                                             else cont TDiff (c:cs)
                     ('-':cs) -> cont TDiff cs
                     ('/':cs) -> cont TDiv cs
                     ('&':cs) -> cont TAnd cs
@@ -275,8 +277,9 @@ lexer cont s = case s of
                                                   _ -> consumirBK (anidado-1) cl cont cs
                               ('\n':cs) -> consumirBK anidado (cl+1) cont cs
                               (_:cs) -> consumirBK anidado cl cont cs
-                          lexNum cs = case span isDigit cs of
-                              (num,rest)     -> cont (TNum num) rest
+                          lexNum neg cs = case span isDigit cs of
+                                        (num,rest)     -> if neg then cont (TNum ('-':num)) rest
+                                                                 else  cont (TNum num) rest
                           lexString cs = case span isNotQuote cs of
                                 (str, ('"':rest)) -> cont (TString str) rest
                                 (str, rest) -> cont (TString str) rest 
